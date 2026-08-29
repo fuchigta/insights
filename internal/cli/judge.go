@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sort"
@@ -457,9 +458,20 @@ func evaluateWithRunInfo(ctx context.Context, j judge.Judge, req judge.Request) 
 	if rj, ok := j.(runInfoJudge); ok {
 		return rj.EvaluateRun(ctx, req)
 	}
+	// 実装していないバックエンドでは評価コストと実行セッション ID を追跡できない。
+	// このツールは「評価そのものが本末転倒になっていないか」を自己監視する前提な
+	// ので、黙って $0 として集計すると自己監視が機能しなくなる。将来 Codex など
+	// 別バックエンドを足したときに気づけるよう警告を出す。
+	warnMissingRunInfoOnce.Do(func() {
+		slog.Warn("評価バックエンドが EvaluateRun を実装していないため、評価コストと実行セッション ID を記録できません",
+			"backend", j.Name())
+	})
 	raw, err := j.Evaluate(ctx, req)
 	return raw, claudecli.RunInfo{}, err
 }
+
+// warnMissingRunInfoOnce は上記の警告をバックエンドごとに何度も出さないための制御。
+var warnMissingRunInfoOnce sync.Once
 
 // evaluateOneSession は 1 セッションを評価用プロンプトに整形し、AI 評価を実行して
 // 結果 JSON（model.Eval として妥当なことを確認済み）を返す。DB への保存はしない
