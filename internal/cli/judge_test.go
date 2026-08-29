@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/fuchigta/insights/internal/config"
 	"github.com/fuchigta/insights/internal/judge"
+	"github.com/fuchigta/insights/internal/judge/claudecli"
 	"github.com/spf13/cobra"
 )
 
@@ -200,6 +202,143 @@ func TestEvaluateSessions_PartialFailureContinuesAndSaves(t *testing.T) {
 	// 失敗した分は保存されていないこと。
 	if _, ok, err := db.EvalFor("sess-fail", "v1", "hash-sess-fail"); err != nil || ok {
 		t.Errorf("EvalFor(sess-fail) = ok=%v err=%v, want ok=false（失敗したので保存されないはず）", ok, err)
+	}
+}
+
+// fakeRateLimitJudge は、どのセッションを評価してもレート制限らしきエラー
+// （claudecli.ErrRateLimited）でラップして返す judge.Judge のフェイク実装。
+// evaluateSessions がレート制限検知で残りの評価を打ち切ることを検証するために使う。
+type fakeRateLimitJudge struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (f *fakeRateLimitJudge) Name() string     { return "fake-ratelimit-judge" }
+func (f *fakeRateLimitJudge) Available() error { return nil }
+
+func (f *fakeRateLimitJudge) Evaluate(_ context.Context, _ judge.Request) (json.RawMessage, error) {
+	f.mu.Lock()
+	f.calls++
+	f.mu.Unlock()
+	return nil, fmt.Errorf("claude の実行がレート制限らしきエラーで失敗しました: %w", claudecli.ErrRateLimited)
+}
+
+func (f *fakeRateLimitJudge) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+// TestEvaluateSessions_RateLimitAbortsRemainingTargets は、いずれかのセッションの評価が
+// claudecli.ErrRateLimited を含むエラーで失敗したら、残りの未着手セッションは評価せずに
+// 打ち切ることを確認する回帰テスト。
+//
+// 並行度に依存して不安定にならないよう Concurrency: 1 で実行する（それでも worker が
+// 次のジョブを取り出す判定と、メインループが abortEval を呼ぶタイミングは厳密には
+// レースしうるため、呼び出し回数はターゲット数「未満」であることだけを確認する）。
+func TestEvaluateSessions_RateLimitAbortsRemainingTargets(t *testing.T) {
+	db := newTempDB(t)
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+
+	const n = 5
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("sess-%d", i)
+		saveTestSession(t, db, testSessionSpec{
+			SessionID: id, ProjectPath: "/proj-a", FirstPrompt: "task",
+			StartedAt: base.Add(time.Duration(i) * time.Hour),
+			EndedAt:   base.Add(time.Duration(i)*time.Hour + 5*time.Minute),
+			CostUSD:   0.01, CostKnown: true,
+		})
+	}
+
+	from, to := base.Add(-time.Hour), base.Add(24*time.Hour)
+	rows, err := db.SessionsInRange(from, to)
+	if err != nil {
+		t.Fatalf("SessionsInRange() error = %v", err)
+	}
+	if len(rows) != n {
+		t.Fatalf("前提: rows の件数 = %d, want %d", len(rows), n)
+	}
+
+	fj := &fakeRateLimitJudge{}
+	cfg := config.Default()
+
+	result, err := evaluateSessions(context.Background(), evalDeps{
+		DB: db, Judge: fj, Cfg: cfg, Model: "claude-sonnet-5", JudgeName: "fake-judge",
+		PromptVersion: "v1", Concurrency: 1,
+	}, rows, nil, map[string]*sessionCostAgg{}, io.Discard)
+	if err != nil {
+		t.Fatalf("evaluateSessions() error = %v, want nil（レート制限は ctx キャンセルではないので error を返さない）", err)
+	}
+
+	if !result.RateLimited {
+		t.Error("RateLimited = false, want true")
+	}
+	if len(result.Succeeded) != 0 {
+		t.Errorf("Succeeded = %v, want 空（レート制限で全滅するはず）", result.Succeeded)
+	}
+	if len(result.Failed) != n {
+		t.Errorf("Failed の件数 = %d, want %d（打ち切り分も Failed に記録されるはず）", len(result.Failed), n)
+	}
+	if got := fj.callCount(); got >= n {
+		t.Errorf("callCount = %d, want < %d（残りは評価せずに打ち切っているはず）", got, n)
+	}
+}
+
+// TestEvalStageError は evalStageError の判定表を確認する回帰テスト。
+// レート制限、全滅、部分失敗、全件成功の 4 パターンで「後続の AI 処理に進んでよいか」の
+// 判定が変わることを検証する。
+func TestEvalStageError(t *testing.T) {
+	cases := []struct {
+		name    string
+		result  *evalRunResult
+		wantErr bool
+	}{
+		{
+			name:    "nil result はエラーにしない",
+			result:  nil,
+			wantErr: false,
+		},
+		{
+			name: "レート制限で打ち切ったときはエラー",
+			result: &evalRunResult{
+				RateLimited: true,
+				Succeeded:   []string{"sess-ok"},
+				Failed:      []evalFailure{{SessionID: "sess-ng", Reason: "boom"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "成功0件・失敗1件以上（全滅）はエラー",
+			result: &evalRunResult{
+				Failed: []evalFailure{{SessionID: "sess-ng", Reason: "boom"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "部分失敗（成功1件以上）はエラーにしない",
+			result: &evalRunResult{
+				Succeeded: []string{"sess-ok"},
+				Failed:    []evalFailure{{SessionID: "sess-ng", Reason: "boom"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "全件成功はエラーにしない",
+			result: &evalRunResult{
+				Succeeded: []string{"sess-ok-1", "sess-ok-2"},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := evalStageError(c.result)
+			if (err != nil) != c.wantErr {
+				t.Errorf("evalStageError(%+v) error = %v, wantErr %v", c.result, err, c.wantErr)
+			}
+		})
 	}
 }
 

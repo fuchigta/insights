@@ -3,6 +3,8 @@ package claudecli
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +14,34 @@ import (
 
 	"github.com/fuchigta/insights/internal/judge"
 )
+
+// TestMain は、この go test バイナリ自身を偽の claude 実行ファイルとしても再利用できるように
+// するためのフック。INSIGHTS_TEST_FAKE_CLAUDE が設定されていれば、通常のテスト実行（m.Run）
+// を一切行わず、代わりに runOnce が組み立てる argv（-p --output-format json ...）をそのまま
+// 受け取って偽の応答だけを返す。argv の中身は go test 自身のフラグパーサーに渡らない
+// （m.Run より前に return するため flag.Parse が走らない）ので、Windows を含む全 OS で
+// 実際の claude 相当のプロセス起動・失敗を再現できる。
+func TestMain(m *testing.M) {
+	if mode := os.Getenv("INSIGHTS_TEST_FAKE_CLAUDE"); mode != "" {
+		runFakeClaudeProcess(mode)
+		return
+	}
+	os.Exit(m.Run())
+}
+
+// runFakeClaudeProcess は INSIGHTS_TEST_FAKE_CLAUDE の値に応じた偽の claude の振る舞いをして
+// 終了する。
+func runFakeClaudeProcess(mode string) {
+	switch mode {
+	case "ratelimit":
+		// isRateLimitLike が拾う文字列を stderr に出し、非ゼロ終了する。
+		fmt.Fprintln(os.Stderr, "Error: rate limit exceeded (429 too many requests)")
+		os.Exit(1)
+	default:
+		fmt.Fprintln(os.Stderr, "runFakeClaudeProcess: unknown mode "+mode)
+		os.Exit(2)
+	}
+}
 
 func TestName(t *testing.T) {
 	j := New(Options{})
@@ -112,6 +142,42 @@ func TestBuildSystemPrompt(t *testing.T) {
 	got2 := buildSystemPrompt(judge.Request{Schema: json.RawMessage(`{}`)})
 	if !strings.Contains(got2, "{}") {
 		t.Errorf("System 空でも Schema は含まれるべき: %q", got2)
+	}
+}
+
+// TestEvaluate_RateLimitedOutputWrapsErrRateLimited は、レート制限らしき出力（stderr に
+// "rate limit" を含む）で claude 実行が失敗したとき、Evaluate の最終エラーから
+// errors.Is(err, ErrRateLimited) で識別できることを確認する回帰テスト。
+// runWithBackoff は一時的失敗を maxTransientAttempts(=3) 回リトライしたうえで最後にまとめて
+// エラーを返すため、その「最終エラー」経由でも番兵エラーが失われない（%w の連鎖が保たれる）
+// ことも合わせて検証する。
+//
+// maxTransientAttempts=3・バックオフ 1s+2s の設定では、このテスト 1 本で正味 3 秒程度の
+// 待ち時間が発生する。値としては許容範囲だが、これ以上ケースを増やすと待ち時間が積み上がる
+// ため、あえて 1 ケースに留める（testing.Short での分岐はしない）。
+func TestEvaluate_RateLimitedOutputWrapsErrRateLimited(t *testing.T) {
+	j := New(Options{
+		BinPath: os.Args[0], // このテストバイナリ自身を偽の claude として使う（TestMain 参照）
+		Timeout: 10 * time.Second,
+		WorkDir: t.TempDir(),
+	})
+
+	t.Setenv("INSIGHTS_TEST_FAKE_CLAUDE", "ratelimit")
+
+	start := time.Now()
+	_, err := j.Evaluate(context.Background(), judge.Request{Prompt: "test prompt"})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Evaluate() error = nil, want error")
+	}
+	if !errors.Is(err, ErrRateLimited) {
+		t.Errorf("errors.Is(err, ErrRateLimited) = false, want true: %v", err)
+	}
+	// 3 回の試行 + バックオフ 1s+2s = 3s が目安。プロセス起動オーバーヘッドを見込んでも
+	// 明らかに超過していればリトライ回数・バックオフの変更を疑う。
+	if elapsed > 15*time.Second {
+		t.Errorf("elapsed = %v, リトライ待ちが長すぎる（maxTransientAttempts/バックオフの変更を確認）", elapsed)
 	}
 }
 

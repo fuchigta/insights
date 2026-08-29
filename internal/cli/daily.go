@@ -233,6 +233,7 @@ func runDaily(
 				judgeSessionIDs = evalResult.RunSessionIDs
 				if len(evalResult.Failed) > 0 {
 					fmt.Fprintf(stderr, "insights daily: 評価に失敗したセッションが %d 件あります\n", len(evalResult.Failed))
+					reportEvalFailures(stderr, evalResult)
 				}
 			}
 			// ctx キャンセル（Ctrl-C）のときだけ daily 全体を中断する。個々の評価失敗では続行する。
@@ -241,6 +242,15 @@ func runDaily(
 				result.JudgeSessionIDs = judgeSessionIDs
 				result.DurationSeconds = time.Since(start).Seconds()
 				return result, evalErr
+			}
+			// レート制限中、あるいは評価が 1 件も成功しなかった状態では、続く日報・振り返りの
+			// 生成（AI 呼び出し 2 回）もまず失敗する。ここで打ち切って、確実に失敗する呼び出しと
+			// 中身の無い成果物を作らない。
+			if stageErr := evalStageError(evalResult); stageErr != nil {
+				result.JudgeCostUSD = judgeCostUSD
+				result.JudgeSessionIDs = judgeSessionIDs
+				result.DurationSeconds = time.Since(start).Seconds()
+				return result, fmt.Errorf("%w。評価なしで日報だけ作る場合は --no-judge を指定してください", stageErr)
 			}
 		}
 	}

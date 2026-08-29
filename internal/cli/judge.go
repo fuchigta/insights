@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -113,6 +114,54 @@ type evalFailure struct {
 	Reason    string `json:"reason"`
 }
 
+// errEvalAborted はレート制限の検知により、評価を実行せず打ち切ったセッションの理由。
+var errEvalAborted = errors.New("レート制限を検知したため評価を実行しませんでした")
+
+// maxShownFailureReasons は失敗理由を stderr に何件まで並べるか。
+// 全件出すと対象が多い日にログが失敗理由で埋まるため、代表例だけ見せる。
+const maxShownFailureReasons = 3
+
+// reportEvalFailures は評価に失敗したセッションの理由を stderr に出す。
+// 件数だけでは原因（レート制限なのか、応答がスキーマに合わないのか）が分からず、
+// 利用者は同じ実行を繰り返すしかなくなるため、代表例を必ず見せる。
+func reportEvalFailures(stderr io.Writer, r *evalRunResult) {
+	if stderr == nil || r == nil || len(r.Failed) == 0 {
+		return
+	}
+	shown := len(r.Failed)
+	if shown > maxShownFailureReasons {
+		shown = maxShownFailureReasons
+	}
+	for _, f := range r.Failed[:shown] {
+		fmt.Fprintf(stderr, "  - %s: %s\n", f.SessionID, f.Reason)
+	}
+	if len(r.Failed) > shown {
+		fmt.Fprintf(stderr, "  ... 他 %d 件（詳細は --json の failure_details を参照）\n", len(r.Failed)-shown)
+	}
+	if r.RateLimited {
+		fmt.Fprintln(stderr, "insights judge: レート制限が解除されてから再実行してください（成功済みの評価はキャッシュされるため、再実行しても評価し直しにはなりません）")
+	}
+}
+
+// evalStageError は評価結果を見て「後続の AI 処理に進んでよいか」を判定する。
+//
+// レート制限で打ち切ったときと、1 件も成功しなかったときはエラーにする。前者は続けても
+// 同じ失敗を繰り返すだけで、後者は評価が 1 件も無いまま日報を作ることになり、中身の無い
+// 成果物と余計な課金だけが残る。一部だけの失敗は従来どおり続行する。
+func evalStageError(r *evalRunResult) error {
+	if r == nil {
+		return nil
+	}
+	if r.RateLimited {
+		return fmt.Errorf("レート制限のため評価を中止しました（成功 %d 件, 失敗 %d 件）。時間をおいてから再実行してください",
+			len(r.Succeeded), len(r.Failed))
+	}
+	if len(r.Succeeded) == 0 && len(r.Failed) > 0 {
+		return fmt.Errorf("評価対象 %d 件がすべて失敗しました: %s", len(r.Failed), r.Failed[0].Reason)
+	}
+	return nil
+}
+
 // judgeResult は `insights judge` の実行結果全体。--json ではこの構造体をそのまま出す。
 type judgeResult struct {
 	From                string        `json:"from"`
@@ -125,6 +174,7 @@ type judgeResult struct {
 	Evaluated           int           `json:"evaluated"`
 	Failed              int           `json:"failed"`
 	FailureDetails      []evalFailure `json:"failure_details,omitempty"`
+	RateLimited         bool          `json:"rate_limited,omitempty"` // レート制限を検知して残りの評価を打ち切ったか
 	EstimatedCostUSD    float64       `json:"estimated_cost_usd"`
 	ActualCostUSD       float64       `json:"actual_cost_usd"`
 	EvaluatedSessionIDs []string      `json:"evaluated_session_ids,omitempty"`
@@ -226,6 +276,7 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 	result.Evaluated = len(evalResult.Succeeded)
 	result.Failed = len(evalResult.Failed)
 	result.FailureDetails = evalResult.Failed
+	result.RateLimited = evalResult.RateLimited
 	result.ActualCostUSD = evalResult.CostUSD
 	result.EvaluatedSessionIDs = evalResult.Succeeded
 	result.JudgeRunSessionIDs = evalResult.RunSessionIDs
@@ -233,8 +284,14 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 
 	fmt.Fprintf(stderr, "insights judge: 完了（成功 %d 件, 失敗 %d 件, 実コスト $%.4f）\n",
 		result.Evaluated, result.Failed, result.ActualCostUSD)
+	reportEvalFailures(stderr, evalResult)
 
-	return result, evalErr
+	if evalErr != nil {
+		return result, evalErr
+	}
+	// 全滅・レート制限を「成功」として返すと、`insights run` が judge 段階を OK と見なして
+	// daily に進み、daily が同じ未評価セッションをもう一度評価してしまう。
+	return result, evalStageError(evalResult)
 }
 
 // judgeRangeLabel は judgeResult に表示する期間ラベル。
@@ -438,8 +495,11 @@ type evalDeps struct {
 
 // evalRunResult は evaluateSessions の実行結果。
 type evalRunResult struct {
-	Succeeded     []string
-	Failed        []evalFailure
+	Succeeded []string
+	Failed    []evalFailure
+	// RateLimited はレート制限を検知して残りの評価を打ち切ったことを表す。
+	// この状態では後続の AI 呼び出しも失敗するため、呼び出し側は先に進まない。
+	RateLimited   bool
 	CostUSD       float64  // RunInfo から取れた分の合計（claudecli.Judge 以外では 0 のまま）
 	RunSessionIDs []string // claude 実行自体の session_id（claudecli.Judge 以外では空のまま）
 }
@@ -546,6 +606,11 @@ func evaluateOneSession(
 // 1 件の評価失敗で全体を止めない。失敗は evalRunResult.Failed に集計し、成功した分は
 // 保存したうえで結果を返す。ctx がキャンセルされた場合のみ error を返す（呼び出し側が
 // 中断を検知できるようにするため）。
+//
+// ただしレート制限だけは例外で、検知した時点で残りの評価を打ち切る。レート制限は
+// 対象セッションごとの失敗ではなくアカウント全体に効いている状態なので、残りを
+// 走らせても失敗が増えるだけ（1 件あたり最大 3 回のリトライぶん時間も食う）。
+// 打ち切ったことは evalRunResult.RateLimited で呼び出し側に伝える。
 func evaluateSessions(
 	ctx context.Context,
 	deps evalDeps,
@@ -558,6 +623,11 @@ func evaluateSessions(
 	if len(targets) == 0 {
 		return result, nil
 	}
+
+	// レート制限を検知したときに未着手のジョブを止めるための内部キャンセル。
+	// 親 ctx（Ctrl-C）とは区別したいので別に用意する。
+	evalCtx, abortEval := context.WithCancel(ctx)
+	defer abortEval()
 
 	type outcome struct {
 		sessionID string
@@ -583,11 +653,17 @@ func evaluateSessions(
 		go func() {
 			defer wg.Done()
 			for row := range jobs {
-				if ctx.Err() != nil {
-					outcomes <- outcome{sessionID: row.SessionID, err: ctx.Err()}
+				if evalCtx.Err() != nil {
+					// 中断理由を取り違えないよう、親 ctx のキャンセル（Ctrl-C）と
+					// レート制限による打ち切りを分けて記録する。
+					if ctx.Err() != nil {
+						outcomes <- outcome{sessionID: row.SessionID, err: ctx.Err()}
+					} else {
+						outcomes <- outcome{sessionID: row.SessionID, err: errEvalAborted}
+					}
 					continue
 				}
-				raw, run, err := evaluateOneSession(ctx, deps, row, childrenByParent[row.SessionID], costs)
+				raw, run, err := evaluateOneSession(evalCtx, deps, row, childrenByParent[row.SessionID], costs)
 				outcomes <- outcome{sessionID: row.SessionID, raw: raw, run: run, err: err}
 			}
 		}()
@@ -609,13 +685,28 @@ func evaluateSessions(
 	}
 
 	processed := 0
+	aborted := 0
 	for o := range outcomes {
+		// レート制限で打ち切ったぶんを進捗に混ぜると、評価を続けたように見えてしまう。
+		// 打ち切った件数は最後にまとめて 1 行で伝える。
+		if errors.Is(o.err, errEvalAborted) {
+			aborted++
+			result.Failed = append(result.Failed, evalFailure{SessionID: o.sessionID, Reason: o.err.Error()})
+			continue
+		}
 		processed++
 		if stderr != nil {
 			fmt.Fprintf(stderr, "insights judge: %d/%d 件処理済み\n", processed, len(targets))
 		}
 
 		if o.err != nil {
+			if errors.Is(o.err, claudecli.ErrRateLimited) && !result.RateLimited {
+				result.RateLimited = true
+				if stderr != nil {
+					fmt.Fprintln(stderr, "insights judge: レート制限らしきエラーを検知したため、残りのセッションの評価を打ち切ります")
+				}
+				abortEval()
+			}
 			result.Failed = append(result.Failed, evalFailure{SessionID: o.sessionID, Reason: o.err.Error()})
 			continue
 		}
@@ -633,6 +724,10 @@ func evaluateSessions(
 		if strings.TrimSpace(o.run.SessionID) != "" {
 			result.RunSessionIDs = append(result.RunSessionIDs, o.run.SessionID)
 		}
+	}
+
+	if aborted > 0 && stderr != nil {
+		fmt.Fprintf(stderr, "insights judge: レート制限のため %d 件は評価せずに打ち切りました\n", aborted)
 	}
 
 	sort.Strings(result.Succeeded)

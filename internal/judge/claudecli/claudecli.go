@@ -33,6 +33,14 @@ const maxSchemaAttempts = 2
 // スキーマ不一致の再試行（maxSchemaAttempts）とは別枠。
 const maxTransientAttempts = 3
 
+// ErrRateLimited はレート制限らしき理由で claude の実行が失敗したことを表す番兵エラー。
+//
+// レート制限は「このセッションの評価だけが失敗した」のではなく、アカウント全体に効いて
+// いる状態を示す。文字列一致ではなく errors.Is で識別できるようにして、呼び出し側が残りの
+// セッションの評価を打ち切れるようにしている（制限中に叩き続けても失敗が増えるだけで、
+// 課金確認を通した意味も失われる）。
+var ErrRateLimited = errors.New("claude の実行がレート制限らしきエラーで失敗しました")
+
 // Options は Judge の構成。
 type Options struct {
 	// Model は空ならフラグを渡さず claude の既定モデルを使う。
@@ -404,7 +412,7 @@ func (j *Judge) runOnce(ctx context.Context, workDir, systemPrompt, userPrompt, 
 			return nil, true, fmt.Errorf("claude の実行がタイムアウトしました (%s): %w", j.opts.Timeout, err)
 		}
 		if isRateLimitLike(stdout.String() + "\n" + stderr.String()) {
-			return nil, true, fmt.Errorf("claude の実行がレート制限らしきエラーで失敗しました: %w (stderr=%s)", err, stderr.String())
+			return nil, true, fmt.Errorf("%w: %w (stderr=%s)", ErrRateLimited, err, stderr.String())
 		}
 		// プロセス起動失敗（実行ファイルが見つからない等）も含め、一時的失敗として
 		// リトライ対象にする（要件どおり）。

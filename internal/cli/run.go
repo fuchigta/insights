@@ -120,10 +120,12 @@ func runAll(cmd *cobra.Command, cfg *config.Config, opts runOptions) error {
 
 	// --- 3. daily ---
 	fmt.Fprintln(stderr, "insights run: daily を実行します")
-	// judge 段階で既に課金確認を通しているため、daily 側の確認は省略する。
-	// judge が一部失敗して未評価が残っていた場合、daily が再度確認を求めて
-	// 非対話環境で止まってしまうのを防ぐ。
-	dailyRes, dailyErr := dailyRun(cmd, cfg, dailyOptions{Date: date, Yes: opts.Yes})
+	// 未評価セッションの評価は直前の judge 段階で済ませているため、daily 側の評価は止める
+	// （--no-judge 相当）。ここを有効にしたままだと、judge 段階で失敗したセッションを daily が
+	// 同じ条件で評価し直し、レート制限のように継続する失敗のときは同じ評価が 2 回走る。
+	// daily 側の課金確認は日報・振り返りの生成 2 回ぶんだけになり、judge 段階の確認とは
+	// 対象が重ならない。
+	dailyRes, dailyErr := dailyRun(cmd, cfg, dailyOptions{Date: date, Yes: opts.Yes, NoJudge: true})
 	result.Daily = dailyRes
 	result.Stages = append(result.Stages, stageFrom("daily", dailyErr))
 	if dailyErr != nil {

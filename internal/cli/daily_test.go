@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/fuchigta/insights/internal/config"
 	"github.com/fuchigta/insights/internal/judge"
+	"github.com/fuchigta/insights/internal/judge/claudecli"
 	"github.com/fuchigta/insights/internal/pricing"
 	"github.com/spf13/cobra"
 )
@@ -48,6 +50,76 @@ func (f *fakeDailyJudge) Evaluate(_ context.Context, req judge.Request) (json.Ra
 		return validDailyJSON(), nil
 	}
 	return validRetroJSON(), nil
+}
+
+// fakeRateLimitDailyJudge は、セッション評価のリクエストに対して常に claudecli.ErrRateLimited
+// をラップしたエラーを返す judge.Judge のフェイク実装。日報・振り返り生成（rollup.Synthesize）
+// のリクエストが来た場合は nonSessionCalls を数えるだけにしておき、
+// 「レート制限を検知したら Synthesize 相当の呼び出しが一度も行われない」ことを検証できるようにする。
+type fakeRateLimitDailyJudge struct {
+	sessionCalls    int
+	nonSessionCalls int
+}
+
+func (f *fakeRateLimitDailyJudge) Name() string     { return "fake-ratelimit-daily-judge" }
+func (f *fakeRateLimitDailyJudge) Available() error { return nil }
+
+func (f *fakeRateLimitDailyJudge) Evaluate(_ context.Context, req judge.Request) (json.RawMessage, error) {
+	if strings.Contains(req.Prompt, "## セッション基本情報") {
+		f.sessionCalls++
+		return nil, fmt.Errorf("claude の実行がレート制限らしきエラーで失敗しました: %w", claudecli.ErrRateLimited)
+	}
+	// レート制限で打ち切られる想定のため、ここに到達したら回帰（バグの再発）。
+	f.nonSessionCalls++
+	return validDailyJSON(), nil
+}
+
+// TestDaily_RateLimitAbortsBeforeSynthesize は、評価段階でレート制限を検知した場合、
+// runDaily が evalStageError で打ち切り、日報・振り返りの生成（rollup.Synthesize 相当の
+// AI 呼び出し）に一度も進まないことを確認する回帰テスト。
+// 進んでしまうと、レート制限中に確実に失敗する追加の AI 呼び出しが発生し、
+// 中身の無い成果物と余計な課金だけが残ってしまう。
+func TestDaily_RateLimitAbortsBeforeSynthesize(t *testing.T) {
+	db := newTempDB(t)
+	outDir := t.TempDir()
+	cfg := config.Default()
+	cfg.Output.Dir = outDir
+
+	date := "2026-08-26"
+	base := time.Date(2026, 8, 26, 9, 0, 0, 0, time.UTC)
+
+	saveTestSession(t, db, testSessionSpec{
+		SessionID: "sess-1", ProjectPath: "/proj-a", FirstPrompt: "fix bug",
+		StartedAt: base, EndedAt: base.Add(5 * time.Minute), CostUSD: 0.03, CostKnown: true,
+	})
+
+	dayStart, dayEnd, err := dayRange(date)
+	if err != nil {
+		t.Fatalf("dayRange() error = %v", err)
+	}
+	rows, err := db.SessionsInRange(dayStart, dayEnd)
+	if err != nil {
+		t.Fatalf("SessionsInRange() error = %v", err)
+	}
+
+	prices, err := pricing.Load(nil)
+	if err != nil {
+		t.Fatalf("pricing.Load() error = %v", err)
+	}
+
+	fj := &fakeRateLimitDailyJudge{}
+	cmd := newDailyTestCmd(t)
+
+	if _, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, false, true); err == nil {
+		t.Fatal("runDaily() error = nil, want error（レート制限で打ち切るはず）")
+	}
+
+	if fj.sessionCalls == 0 {
+		t.Error("sessionCalls = 0, want > 0（評価自体は試みられているはず）")
+	}
+	if fj.nonSessionCalls != 0 {
+		t.Errorf("nonSessionCalls = %d, want 0（日報・振り返りの生成に進んではいけない）", fj.nonSessionCalls)
+	}
 }
 
 func newDailyTestCmd(t *testing.T) *cobra.Command {
@@ -298,3 +370,12 @@ func TestDaily_NoJudgeSkipsEvaluation(t *testing.T) {
 		t.Error("--no-judge でも日報・振り返りは生成されるはず")
 	}
 }
+
+// TestDaily_JudgeCostComesFromExistingEvalsWhenNotJudgedThisRun は、`insights judge` で
+// 先に評価を済ませてから日報を作る経路（--no-judge で実行しても、その日のセッションが
+// 既に別の実行で評価済みのケースに相当する）で meta.judge_cost_usd / meta.judge_session_ids
+// が常に 0 / 空になっていた回帰の再発防止テスト。
+//
+// runDaily はその実行内で評価した分だけを集計するのではなく、DB に残っている
+// session_evals から db.EvalRunTotals で引き直すことで、評価を先に済ませた経路でも
+// 正しいコストと run_session_id を日報に載せられるようにしている。
