@@ -1,0 +1,52 @@
+# git-cliff の設定。リリースノートを Conventional Commits から自動生成する。
+# 生の git 差分をそのまま並べるのではなく、変更の意図が読み取れる形にするのが目的。
+#
+# ローカル検証:
+#   git-cliff --config cliff.toml --latest --strip header
+
+[changelog]
+header = ""
+# グループの並び順は commit_parsers の <!-- N --> で制御し、出力時に striptags で取り除く。
+body = """
+{% if version %}\
+## {{ version | trim_start_matches(pat="v") }} ({{ timestamp | date(format="%Y-%m-%d") }})
+{% else %}\
+## 未リリース
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}\
+### {{ group | striptags | trim }}
+{% for commit in commits %}\
+- {% if commit.breaking %}**破壊的変更** {% endif %}\
+{{ commit.message | split(pat="\n") | first | trim }}\
+{% if commit.id %} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/fuchigta/insights/commit/{{ commit.id }})){% endif %}
+{% endfor %}
+{% endfor %}"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+# Conventional Commits に従っていないコミットも捨てず「その他」に入れる。
+# 規約を導入する前の履歴が消えてしまわないようにするため。
+filter_unconventional = false
+filter_commits = false
+protect_breaking_commits = true
+split_commits = false
+topo_order = false
+sort_commits = "oldest"
+tag_pattern = "v[0-9]*"
+
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->新機能" },
+  { message = "^fix", group = "<!-- 1 -->不具合修正" },
+  { message = "^perf", group = "<!-- 2 -->性能改善" },
+  { message = "^refactor", group = "<!-- 3 -->リファクタリング" },
+  { message = "^docs", group = "<!-- 4 -->ドキュメント" },
+  { message = "^test", group = "<!-- 5 -->テスト" },
+  { message = "^build", group = "<!-- 6 -->ビルド・依存関係" },
+  # リリース作業そのものはノイズなので載せない。
+  { message = '^chore\(release\)', skip = true },
+  { message = "^ci", group = "<!-- 7 -->CI" },
+  { message = "^chore", group = "<!-- 8 -->雑務" },
+  { message = ".*", group = "<!-- 9 -->その他" },
+]

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Conventional Commits に従わないコミットを拒否する。
+# 有効化: git config core.hooksPath .githooks
+set -eu
+# git はフックをリポジトリのルートで実行する。
+exec scripts/check-commit-subject.sh "$(head -n 1 "$1")"

@@ -28,3 +28,4 @@ Thumbs.db
 # 埋め込みプロンプト（internal/**/prompts/*.md など）は対象外。
 /*.md
 !/README.md
+!/CLAUDE.md

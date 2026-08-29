@@ -80,3 +80,31 @@ jobs:
       # その境界が壊れていないことを競合検出器で確認する。
       - name: go test -race
         run: go test -race ./...
+
+  commit-lint:
+    name: commit message
+    runs-on: ubuntu-latest
+    steps:
+      # 追加されたコミットの範囲を辿るため履歴を全部持ってくる。
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # ローカルの commit-msg フックはすり抜けうる（フックは clone に含まれず、
+      # 有効化も手動のため）。CI を最後の歯止めにする。
+      - name: Conventional Commits の検証
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            range="origin/${BASE}..HEAD"
+          elif [ -n "${BEFORE:-}" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            range="${BEFORE}..${GITHUB_SHA}"
+          else
+            # 新しいブランチの初回 push など、比較対象が無い場合は先頭のみ見る。
+            range="-1"
+          fi
+          echo "対象範囲: ${range}"
+          git log --format=%s "${range}" | ./scripts/check-commit-subject.sh
