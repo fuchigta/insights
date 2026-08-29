@@ -712,7 +712,8 @@ func evaluateSessions(
 		}
 
 		row := bySessionID[o.sessionID]
-		if err := deps.DB.SaveEval(o.sessionID, deps.JudgeName, deps.Model, deps.PromptVersion, row.ContentHash, o.raw); err != nil {
+		if err := deps.DB.SaveEval(o.sessionID, deps.JudgeName, deps.Model, deps.PromptVersion, row.ContentHash, o.raw,
+			store.EvalRun{CostUSD: o.run.CostUSD, SessionID: o.run.SessionID}); err != nil {
 			result.Failed = append(result.Failed, evalFailure{SessionID: o.sessionID, Reason: fmt.Sprintf("評価結果の保存に失敗しました: %v", err)})
 			continue
 		}

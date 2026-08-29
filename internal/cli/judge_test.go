@@ -15,6 +15,7 @@ import (
 	"github.com/fuchigta/insights/internal/config"
 	"github.com/fuchigta/insights/internal/judge"
 	"github.com/fuchigta/insights/internal/judge/claudecli"
+	"github.com/fuchigta/insights/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -134,7 +135,7 @@ func TestPrepareEvalTargets_CacheSkipAndForce(t *testing.T) {
 		t.Fatalf("1回目: targets=%d cacheSkipped=%d, want 1, 0", len(targets), cacheSkipped)
 	}
 
-	if err := db.SaveEval("sess-1", "fake-judge", "claude-sonnet-5", "v1", targets[0].ContentHash, validEvalJSON("achieved")); err != nil {
+	if err := db.SaveEval("sess-1", "fake-judge", "claude-sonnet-5", "v1", targets[0].ContentHash, validEvalJSON("achieved"), store.EvalRun{}); err != nil {
 		t.Fatalf("SaveEval() error = %v", err)
 	}
 

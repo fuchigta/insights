@@ -276,8 +276,15 @@ func runDaily(
 		return nil, fmt.Errorf("日次集計に失敗しました: %w", err)
 	}
 
-	daily.Meta.JudgeCostUSD = judgeCostUSD
-	daily.Meta.JudgeSessionIDs = judgeSessionIDs
+	// 評価コストは「この daily 実行の中で評価した分」ではなく、DB に残っている評価から引き直す。
+	// judge を先に済ませてから日報を作る経路（`insights run` を含む）ではこの実行での評価は
+	// 0 件になり、その場の集計だけでは meta.judge_cost_usd が常に 0 になってしまうため。
+	evalCostUSD, evalRunSessionIDs, err := db.EvalRunTotals(sessionIDsOf(rows), prompts.PromptVersion)
+	if err != nil {
+		return nil, fmt.Errorf("評価コストの集計に失敗しました: %w", err)
+	}
+	daily.Meta.JudgeCostUSD = evalCostUSD
+	daily.Meta.JudgeSessionIDs = evalRunSessionIDs
 
 	openActions, err := db.ActionsByStatus(model.ActionOpen)
 	if err != nil {
@@ -398,6 +405,15 @@ func loadRecentDailies(db *store.DB, date string, days int) ([]*rollup.Daily, er
 		out = append(out, &d)
 	}
 	return out, nil
+}
+
+// sessionIDsOf は集計対象セッションの ID だけを取り出す。
+func sessionIDsOf(rows []store.SessionRow) []string {
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.SessionID)
+	}
+	return ids
 }
 
 // --- 出力 ---

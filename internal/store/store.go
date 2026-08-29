@@ -352,19 +352,25 @@ func (d *DB) LastIngestAt() (time.Time, error) {
 // --- 評価キャッシュ ---
 
 // SaveEval は判定結果を (session_id, prompt_version) 単位でキャッシュする。
-func (d *DB) SaveEval(sessionID, judge, judgeModel, promptVersion, contentHash string, eval json.RawMessage) error {
+// run にはその評価にかかった実コストと claude 実行の session_id を渡す（取得できない
+// バックエンドではゼロ値でよい）。日報がどの経路で評価しても同じ評価コストを出せるよう、
+// 評価結果と同じ行に残す。
+func (d *DB) SaveEval(sessionID, judge, judgeModel, promptVersion, contentHash string, eval json.RawMessage, run EvalRun) error {
 	now := time.Now().UTC().Format(timeLayout)
 	_, err := d.db.Exec(`
 		INSERT INTO session_evals (
-			session_id, judge, judge_model, prompt_version, content_hash, eval_json, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
+			session_id, judge, judge_model, prompt_version, content_hash, eval_json, created_at,
+			cost_usd, run_session_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, prompt_version) DO UPDATE SET
-			judge        = excluded.judge,
-			judge_model  = excluded.judge_model,
-			content_hash = excluded.content_hash,
-			eval_json    = excluded.eval_json,
-			created_at   = excluded.created_at
-	`, sessionID, judge, judgeModel, promptVersion, contentHash, string(eval), now)
+			judge          = excluded.judge,
+			judge_model    = excluded.judge_model,
+			content_hash   = excluded.content_hash,
+			eval_json      = excluded.eval_json,
+			created_at     = excluded.created_at,
+			cost_usd       = excluded.cost_usd,
+			run_session_id = excluded.run_session_id
+	`, sessionID, judge, judgeModel, promptVersion, contentHash, string(eval), now, run.CostUSD, run.SessionID)
 	if err != nil {
 		return fmt.Errorf("session_evals(%s, %s) の保存に失敗: %w", sessionID, promptVersion, err)
 	}
@@ -389,6 +395,53 @@ func (d *DB) EvalFor(sessionID, promptVersion, contentHash string) (json.RawMess
 		return nil, false, nil
 	}
 	return json.RawMessage(evalJSON), true, nil
+}
+
+// EvalRunTotals は指定セッションの評価にかかった実コストの合計と、その評価を行った
+// claude 実行の session_id 一覧を返す。評価がまだ無いセッションは単に無視する。
+//
+// 日報の meta.judge_cost_usd / meta.judge_session_ids はこの値を使う。その場の実行で
+// 評価した分だけを数えると、`insights judge` で先に評価を済ませてから日報を作る経路
+// （`insights run` を含む）では常に 0 になり、評価コストの自己監視が働かなくなるため、
+// 実行結果ではなく DB から引き直す。
+// 返す session_id 一覧は、日報 JSON の差分が並び順で揺れないよう session_id 順に固定する。
+func (d *DB) EvalRunTotals(sessionIDs []string, promptVersion string) (float64, []string, error) {
+	if len(sessionIDs) == 0 {
+		return 0, nil, nil
+	}
+
+	args := make([]any, 0, len(sessionIDs)+1)
+	args = append(args, promptVersion)
+	for _, id := range sessionIDs {
+		args = append(args, id)
+	}
+	placeholders := strings.TrimPrefix(strings.Repeat(",?", len(sessionIDs)), ",")
+
+	rows, err := d.db.Query(
+		`SELECT cost_usd, run_session_id FROM session_evals WHERE prompt_version = ? AND session_id IN (`+placeholders+`) ORDER BY session_id`,
+		args...)
+	if err != nil {
+		return 0, nil, fmt.Errorf("session_evals の評価コスト取得に失敗: %w", err)
+	}
+	defer rows.Close()
+
+	var total float64
+	var runIDs []string
+	for rows.Next() {
+		var cost float64
+		var runID string
+		if err := rows.Scan(&cost, &runID); err != nil {
+			return 0, nil, fmt.Errorf("session_evals の評価コスト読み取りに失敗: %w", err)
+		}
+		total += cost
+		if strings.TrimSpace(runID) != "" {
+			runIDs = append(runIDs, runID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, nil, fmt.Errorf("session_evals の走査に失敗: %w", err)
+	}
+	return total, runIDs, nil
 }
 
 // UnevaluatedSessions は from〜to に開始した中で、指定した prompt_version の評価が

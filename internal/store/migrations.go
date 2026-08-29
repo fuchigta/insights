@@ -11,6 +11,7 @@ type migration struct {
 // migrations は適用順のスキーマ変更一覧。
 var migrations = []migration{
 	{version: 1, sql: schemaV1},
+	{version: 2, sql: schemaV2},
 }
 
 // schemaV1 は初期スキーマ。insights が正規化データを保存する全テーブルをここで作る。
@@ -127,4 +128,16 @@ CREATE INDEX IF NOT EXISTS idx_sessions_started_at   ON sessions(started_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_project_path ON sessions(project_path);
 CREATE INDEX IF NOT EXISTS idx_usage_events_ts        ON usage_events(ts);
 CREATE INDEX IF NOT EXISTS idx_messages_session_id    ON messages(session_id);
+`
+
+// schemaV2 は評価 1 件ごとの実コストと、その評価を行った claude 実行の session_id を
+// session_evals に持たせる。
+//
+// これが無いと「評価にいくら使ったか」はその場の実行結果にしか残らず、評価を
+// `insights judge` で先に済ませてから日報を作る経路（`insights run` を含む）では
+// 日報の meta.judge_cost_usd が常に 0 になる。振り返りのコストを自己監視するための
+// 数字なので、評価結果と同じ行に永続化して、どの経路で評価しても同じ値が出るようにする。
+const schemaV2 = `
+ALTER TABLE session_evals ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0;
+ALTER TABLE session_evals ADD COLUMN run_session_id TEXT NOT NULL DEFAULT '';
 `

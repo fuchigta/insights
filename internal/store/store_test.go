@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"testing"
@@ -217,7 +218,7 @@ func TestEvalCache_ContentHashMismatch(t *testing.T) {
 	}
 
 	evalJSON := json.RawMessage(`{"outcome":"achieved"}`)
-	if err := d.SaveEval("sess-eval", "claude-cli", "claude-opus-5", "v1", s.ContentHash, evalJSON); err != nil {
+	if err := d.SaveEval("sess-eval", "claude-cli", "claude-opus-5", "v1", s.ContentHash, evalJSON, EvalRun{}); err != nil {
 		t.Fatalf("SaveEval() error = %v", err)
 	}
 
@@ -266,6 +267,106 @@ func TestEvalCache_ContentHashMismatch(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("v2 は未評価のはずなのに UnevaluatedSessions に含まれていない")
+	}
+}
+
+// TestEvalRunTotals_AggregatesAcrossSessions は、日報が meta.judge_cost_usd /
+// meta.judge_session_ids を組み立てる際に使う EvalRunTotals の集計仕様を確認する回帰テスト。
+// `insights judge` で先に評価を済ませてから日報を作る経路では、その場の実行結果ではなく
+// この集計を頼りにコストと run_session_id を復元するため、複数セッション分の合計・
+// run_session_id が空の評価の除外・対象外 prompt_version・空の sessionIDs を網羅する。
+func TestEvalRunTotals_AggregatesAcrossSessions(t *testing.T) {
+	d := openTestDB(t)
+
+	sessions := []string{"sess-a", "sess-b", "sess-c"}
+	for _, id := range sessions {
+		if err := d.SaveSession(testSession(id), nil); err != nil {
+			t.Fatalf("SaveSession(%s) error = %v", id, err)
+		}
+	}
+
+	evalJSON := json.RawMessage(`{"outcome":"achieved"}`)
+	if err := d.SaveEval("sess-a", "claude-cli", "claude-opus-5", "v1", "hash-sess-a", evalJSON,
+		EvalRun{CostUSD: 0.01, SessionID: "run-1"}); err != nil {
+		t.Fatalf("SaveEval(sess-a) error = %v", err)
+	}
+	if err := d.SaveEval("sess-b", "claude-cli", "claude-opus-5", "v1", "hash-sess-b", evalJSON,
+		EvalRun{CostUSD: 0.02, SessionID: "run-2"}); err != nil {
+		t.Fatalf("SaveEval(sess-b) error = %v", err)
+	}
+	// run_session_id が空（コストを取得できないバックエンドを想定）の評価は一覧から除外される。
+	if err := d.SaveEval("sess-c", "claude-cli", "claude-opus-5", "v1", "hash-sess-c", evalJSON,
+		EvalRun{CostUSD: 0.03, SessionID: ""}); err != nil {
+		t.Fatalf("SaveEval(sess-c) error = %v", err)
+	}
+
+	total, runIDs, err := d.EvalRunTotals(sessions, "v1")
+	if err != nil {
+		t.Fatalf("EvalRunTotals() error = %v", err)
+	}
+	if want := 0.06; total < want-1e-9 || total > want+1e-9 {
+		t.Errorf("EvalRunTotals() total = %v, want %v", total, want)
+	}
+	gotRunIDs := map[string]bool{}
+	for _, id := range runIDs {
+		gotRunIDs[id] = true
+	}
+	if len(gotRunIDs) != 2 || !gotRunIDs["run-1"] || !gotRunIDs["run-2"] {
+		t.Errorf("EvalRunTotals() runIDs = %v, want [run-1 run-2]（run_session_id が空の評価は含まれないはず）", runIDs)
+	}
+
+	// 対象外の prompt_version を指定したら評価が見つからず 0 / 空になる。
+	total, runIDs, err = d.EvalRunTotals(sessions, "v2")
+	if err != nil {
+		t.Fatalf("EvalRunTotals(v2) error = %v", err)
+	}
+	if total != 0 {
+		t.Errorf("EvalRunTotals(v2) total = %v, want 0", total)
+	}
+	if runIDs != nil {
+		t.Errorf("EvalRunTotals(v2) runIDs = %v, want nil", runIDs)
+	}
+
+	// sessionIDs が空スライスなら、対象が無いのでクエリを投げずに 0 / nil を返す。
+	total, runIDs, err = d.EvalRunTotals(nil, "v1")
+	if err != nil {
+		t.Fatalf("EvalRunTotals(空) error = %v", err)
+	}
+	if total != 0 || runIDs != nil {
+		t.Errorf("EvalRunTotals(空) = (%v, %v), want (0, nil)", total, runIDs)
+	}
+}
+
+// TestSaveEval_UpsertOverwritesRunFields は、同じ (session_id, prompt_version) への
+// SaveEval の再実行（ON CONFLICT 経路）で cost_usd / run_session_id も上書きされることを
+// 確認する。評価結果本体だけ更新されてコスト情報が古いまま残ると、再評価のたびに
+// meta.judge_cost_usd が積み上がってしまう（合計ではなく最新値であるべき）。
+func TestSaveEval_UpsertOverwritesRunFields(t *testing.T) {
+	d := openTestDB(t)
+	s := testSession("sess-upsert")
+	if err := d.SaveSession(s, nil); err != nil {
+		t.Fatalf("SaveSession() error = %v", err)
+	}
+
+	evalJSON := json.RawMessage(`{"outcome":"achieved"}`)
+	if err := d.SaveEval("sess-upsert", "claude-cli", "claude-opus-5", "v1", s.ContentHash, evalJSON,
+		EvalRun{CostUSD: 0.01, SessionID: "run-1"}); err != nil {
+		t.Fatalf("SaveEval() 1回目 error = %v", err)
+	}
+	if err := d.SaveEval("sess-upsert", "claude-cli", "claude-opus-5", "v1", s.ContentHash, evalJSON,
+		EvalRun{CostUSD: 0.05, SessionID: "run-2"}); err != nil {
+		t.Fatalf("SaveEval() 2回目 error = %v", err)
+	}
+
+	total, runIDs, err := d.EvalRunTotals([]string{"sess-upsert"}, "v1")
+	if err != nil {
+		t.Fatalf("EvalRunTotals() error = %v", err)
+	}
+	if want := 0.05; total < want-1e-9 || total > want+1e-9 {
+		t.Errorf("EvalRunTotals() total = %v, want %v（合算ではなく上書きのはず）", total, want)
+	}
+	if len(runIDs) != 1 || runIDs[0] != "run-2" {
+		t.Errorf("EvalRunTotals() runIDs = %v, want [run-2]", runIDs)
 	}
 }
 
@@ -489,5 +590,78 @@ func TestActions_CreateAndUpdateStatus(t *testing.T) {
 	}
 	if done[0].VerifiedOn != "2026-09-01" {
 		t.Errorf("VerifiedOn = %q, want %q", done[0].VerifiedOn, "2026-09-01")
+	}
+}
+
+// TestMigrate_UpgradesExistingV1Database は、v2 を知らないバージョンで作られた既存 DB を
+// 開いたときに、データを保ったまま session_evals の追加カラムが使えるようになることを確かめる。
+// 利用者の手元にあるのは必ず「前のバージョンで作られた DB」なので、新規作成のときだけ通っても
+// 意味がない。
+func TestMigrate_UpgradesExistingV1Database(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "insights.db")
+
+	// v1 までしか適用されていない DB を手で作る（旧バージョンが残した状態の再現）。
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatalf("schema_migrations の作成に失敗: %v", err)
+	}
+	if _, err := raw.Exec(schemaV1); err != nil {
+		t.Fatalf("schemaV1 の適用に失敗: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)`, time.Now().UTC().Format(timeLayout)); err != nil {
+		t.Fatalf("schema_migrations への記録に失敗: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO session_evals (session_id, judge, judge_model, prompt_version, content_hash, eval_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"sess-old", "claude-cli", "claude-opus-5", "v1", "hash-sess-old", `{"outcome":"achieved"}`, time.Now().UTC().Format(timeLayout)); err != nil {
+		t.Fatalf("旧スキーマへの評価保存に失敗: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("sql.DB.Close() error = %v", err)
+	}
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open()（v1 の DB を開く）error = %v", err)
+	}
+	defer d.Close()
+
+	// 既存行は残り、追加カラムは既定値（0 / 空）として読める。
+	got, ok, err := d.EvalFor("sess-old", "v1", "hash-sess-old")
+	if err != nil {
+		t.Fatalf("EvalFor() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("移行後に既存の評価が読めない")
+	}
+	if len(got) == 0 {
+		t.Error("移行後の eval_json が空になっている")
+	}
+	total, runIDs, err := d.EvalRunTotals([]string{"sess-old"}, "v1")
+	if err != nil {
+		t.Fatalf("EvalRunTotals() error = %v", err)
+	}
+	if total != 0 || runIDs != nil {
+		t.Errorf("移行直後の EvalRunTotals() = (%v, %v), want (0, nil)", total, runIDs)
+	}
+
+	// 移行後は新しいカラムに書き込める。
+	if err := d.SaveEval("sess-old", "claude-cli", "claude-opus-5", "v1", "hash-sess-old",
+		json.RawMessage(`{"outcome":"achieved"}`), EvalRun{CostUSD: 0.04, SessionID: "run-x"}); err != nil {
+		t.Fatalf("SaveEval() error = %v", err)
+	}
+	total, runIDs, err = d.EvalRunTotals([]string{"sess-old"}, "v1")
+	if err != nil {
+		t.Fatalf("EvalRunTotals() error = %v", err)
+	}
+	if want := 0.04; total < want-1e-9 || total > want+1e-9 {
+		t.Errorf("EvalRunTotals() total = %v, want %v", total, want)
+	}
+	if len(runIDs) != 1 || runIDs[0] != "run-x" {
+		t.Errorf("EvalRunTotals() runIDs = %v, want [run-x]", runIDs)
 	}
 }

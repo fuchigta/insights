@@ -15,7 +15,9 @@ import (
 	"github.com/fuchigta/insights/internal/config"
 	"github.com/fuchigta/insights/internal/judge"
 	"github.com/fuchigta/insights/internal/judge/claudecli"
+	"github.com/fuchigta/insights/internal/judge/prompts"
 	"github.com/fuchigta/insights/internal/pricing"
+	"github.com/fuchigta/insights/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -379,3 +381,81 @@ func TestDaily_NoJudgeSkipsEvaluation(t *testing.T) {
 // runDaily はその実行内で評価した分だけを集計するのではなく、DB に残っている
 // session_evals から db.EvalRunTotals で引き直すことで、評価を先に済ませた経路でも
 // 正しいコストと run_session_id を日報に載せられるようにしている。
+func TestDaily_JudgeCostComesFromExistingEvalsWhenNotJudgedThisRun(t *testing.T) {
+	db := newTempDB(t)
+	outDir := t.TempDir()
+	cfg := config.Default()
+	cfg.Output.Dir = outDir
+
+	date := "2026-08-24"
+	base := time.Date(2026, 8, 24, 9, 0, 0, 0, time.UTC)
+
+	saveTestSession(t, db, testSessionSpec{
+		SessionID: "sess-1", ProjectPath: "/proj-a", FirstPrompt: "fix bug",
+		StartedAt: base, EndedAt: base.Add(5 * time.Minute), CostUSD: 0.03, CostKnown: true,
+	})
+
+	// 「insights judge を先に実行済み」を模して、このテスト自身の runDaily 呼び出しより前に
+	// 評価結果を保存しておく。prompt_version は prompts.PromptVersion と一致させないと
+	// キャッシュとして扱われず、EvalRunTotals の対象からも外れてしまう点に注意。
+	if err := db.SaveEval("sess-1", "claude-cli", "claude-opus-5", prompts.PromptVersion, "hash-sess-1",
+		validEvalJSON("achieved"), store.EvalRun{CostUSD: 0.05, SessionID: "judge-run-1"}); err != nil {
+		t.Fatalf("SaveEval() error = %v", err)
+	}
+
+	dayStart, dayEnd, err := dayRange(date)
+	if err != nil {
+		t.Fatalf("dayRange() error = %v", err)
+	}
+	rows, err := db.SessionsInRange(dayStart, dayEnd)
+	if err != nil {
+		t.Fatalf("SessionsInRange() error = %v", err)
+	}
+
+	prices, err := pricing.Load(nil)
+	if err != nil {
+		t.Fatalf("pricing.Load() error = %v", err)
+	}
+
+	fj := &fakeDailyJudge{}
+	cmd := newDailyTestCmd(t)
+
+	// noJudge = true: この実行では 1 件も評価しない（sessionCalls が増えないことで確認する）。
+	// dailyResult（CLI の人間向け出力用の集計値）はこの実行内で評価した分の
+	// judgeCostUSD/judgeSessionIDs をそのまま使っており今回の修正対象ではないため、
+	// ここでは日報（rollup.Daily）の meta 側を検証する。
+	if _, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, true, true); err != nil {
+		t.Fatalf("runDaily(noJudge=true) error = %v", err)
+	}
+	if fj.sessionCalls != 0 {
+		t.Fatalf("sessionCalls = %d, want 0（この実行では評価していないはず）", fj.sessionCalls)
+	}
+
+	// DB に保存された daily rollup の meta.judge_cost_usd / meta.judge_session_ids を検証する
+	// （generate 直後に render.WriteReports が書き出す front matter も同じ daily.Meta が元）。
+	rawRollup, ok, err := db.Rollup(date)
+	if err != nil || !ok {
+		t.Fatalf("db.Rollup(%s) = ok=%v err=%v, want ok=true", date, ok, err)
+	}
+	var rollupDoc struct {
+		Meta struct {
+			JudgeCostUSD    float64  `json:"judge_cost_usd"`
+			JudgeSessionIDs []string `json:"judge_session_ids"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rawRollup, &rollupDoc); err != nil {
+		t.Fatalf("rollup JSON の unmarshal に失敗: %v", err)
+	}
+	if want := 0.05; rollupDoc.Meta.JudgeCostUSD < want-1e-9 || rollupDoc.Meta.JudgeCostUSD > want+1e-9 {
+		t.Errorf("rollup.meta.judge_cost_usd = %v, want %v", rollupDoc.Meta.JudgeCostUSD, want)
+	}
+	found := false
+	for _, id := range rollupDoc.Meta.JudgeSessionIDs {
+		if id == "judge-run-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("rollup.meta.judge_session_ids = %v, want judge-run-1 を含む", rollupDoc.Meta.JudgeSessionIDs)
+	}
+}
