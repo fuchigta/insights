@@ -664,6 +664,12 @@ func evaluateSessions(
 					continue
 				}
 				raw, run, err := evaluateOneSession(evalCtx, deps, row, childrenByParent[row.SessionID], costs)
+				if errors.Is(err, claudecli.ErrRateLimited) {
+					// 打ち切りは結果集約ループではなくここで行う。集約側に任せると、
+					// outcomes が全件ぶんバッファされているぶんワーカーが先に走り切れて
+					// しまい、打ち切りが間に合うかどうかが実行速度まかせになる。
+					abortEval()
+				}
 				outcomes <- outcome{sessionID: row.SessionID, raw: raw, run: run, err: err}
 			}
 		}()
@@ -701,11 +707,11 @@ func evaluateSessions(
 
 		if o.err != nil {
 			if errors.Is(o.err, claudecli.ErrRateLimited) && !result.RateLimited {
+				// 打ち切り自体はワーカー側で済んでいる。ここでは結果への記録と通知だけ行う。
 				result.RateLimited = true
 				if stderr != nil {
 					fmt.Fprintln(stderr, "insights judge: レート制限らしきエラーを検知したため、残りのセッションの評価を打ち切ります")
 				}
-				abortEval()
 			}
 			result.Failed = append(result.Failed, evalFailure{SessionID: o.sessionID, Reason: o.err.Error()})
 			continue

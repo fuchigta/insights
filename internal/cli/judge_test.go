@@ -281,8 +281,11 @@ func TestEvaluateSessions_RateLimitAbortsRemainingTargets(t *testing.T) {
 	if len(result.Failed) != n {
 		t.Errorf("Failed の件数 = %d, want %d（打ち切り分も Failed に記録されるはず）", len(result.Failed), n)
 	}
-	if got := fj.callCount(); got >= n {
-		t.Errorf("callCount = %d, want < %d（残りは評価せずに打ち切っているはず）", got, n)
+	// Concurrency=1 なので、レート制限を踏んだ 1 件目でワーカーが打ち切り、残りは
+	// 評価に入らない。件数を厳密に見ることで「集約が追いつけば止まる」程度の
+	// 実行速度まかせの打ち切りに戻ったら気づける（実際 Linux CI で踏んだ）。
+	if got := fj.callCount(); got != 1 {
+		t.Errorf("callCount = %d, want 1（1 件目で打ち切り、残りは評価しないはず）", got)
 	}
 }
 
