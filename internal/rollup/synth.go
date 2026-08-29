@@ -32,7 +32,6 @@ const PromptVersion = "rollup-synth-v3"
 // type / properties / required / additionalProperties: false を明示した正式な JSON Schema として書く
 // （プロンプト側の「JSON のみを出力せよ」という指示は保険であり、検証の本体はこちらのスキーマ）。
 var dailySchema = json.RawMessage(`{
-	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"title": "DailyNarrative",
 	"description": "internal/rollup.Narrative と 1:1 対応する、日報生成の出力。",
 	"type": "object",
@@ -58,7 +57,6 @@ var dailySchema = json.RawMessage(`{
 // retroSchema は振り返り生成に期待する出力の JSON Schema。
 // dailySchema と同様、`claude -p --json-schema` にそのまま渡せる正式な JSON Schema として書く。
 var retroSchema = json.RawMessage(`{
-	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"title": "Retro",
 	"description": "internal/rollup.Retro と 1:1 対応する、振り返り生成の出力。",
 	"type": "object",

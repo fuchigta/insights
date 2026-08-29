@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "SessionEval",
   "description": "internal/model.Eval と 1:1 対応する、セッション単位の定性評価結果。",
   "type": "object",
