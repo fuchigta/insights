@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SessionEval",
+  "description": "internal/model.Eval と 1:1 対応する、セッション単位の定性評価結果。",
+  "type": "object",
+  "required": [
+    "underlying_goal",
+    "goal_category",
+    "outcome",
+    "artifact_value",
+    "intervention_cost",
+    "rework",
+    "model_fit",
+    "ownership",
+    "learning_value",
+    "friction",
+    "outcome_summary",
+    "confidence"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "underlying_goal": {
+      "type": "string",
+      "description": "ユーザーが本当に達成したかったこと（発話の言葉遣いそのままではなく、意図を要約する）。"
+    },
+    "goal_category": {
+      "type": "string",
+      "enum": [
+        "feature",
+        "bugfix",
+        "research",
+        "automation",
+        "writing",
+        "ops",
+        "learning",
+        "other"
+      ],
+      "description": "セッションの目的の分類。feature=機能追加, bugfix=不具合修正, research=調査・比較検討, automation=自動化, writing=文章作成, ops=運用作業, learning=学習, other=いずれにも当てはまらない。"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "achieved",
+        "partial",
+        "abandoned",
+        "exploratory"
+      ],
+      "description": "目的の達成度。achieved=達成した, partial=部分的に達成した, abandoned=途中で放棄された, exploratory=そもそも達成を目指す性質の作業ではなかった（探索・様子見）。挨拶だけ・即中断のような短いセッションは無理に意味を見出さず exploratory でよい。"
+    },
+    "artifact_value": {
+      "type": "string",
+      "description": "durable=資産になるコード/知見が残った, transient=その場限りで消費された, none=成果物なし",
+      "enum": [
+        "durable",
+        "transient",
+        "none"
+      ]
+    },
+    "intervention_cost": {
+      "type": "object",
+      "description": "ユーザーの介入コストと手戻り（中断回数・軌道修正・言い直し・ツールエラーの堂々巡り）。",
+      "required": [
+        "level",
+        "evidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "介入コストの大きさ。low=ほぼ任せられた, medium=何度か軌道修正が要った, high=頻繁な介入が必要だった。介入が多いこと自体を短絡的に悪と決めつけず、何が介入を必要にしたのかを evidence に書くこと。"
+        },
+        "evidence": {
+          "type": "string",
+          "description": "根拠となる具体的な事実。抽象的な評価語だけにしないこと。"
+        }
+      }
+    },
+    "rework": {
+      "type": "object",
+      "required": [
+        "occurred",
+        "cause"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "occurred": {
+          "type": "boolean",
+          "description": "手戻りが発生したかどうか。"
+        },
+        "cause": {
+          "type": "string",
+          "description": "occurred が false の場合は空文字でよい。"
+        }
+      },
+      "description": "手戻りの有無。同じ作業のやり直し、前に出した結論の破棄、方針転換による作り直しを指す。"
+    },
+    "model_fit": {
+      "type": "object",
+      "description": "モデル選択・委譲の妥当性。over=過剰、appropriate=妥当、under=力不足。",
+      "required": [
+        "verdict",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "over",
+            "appropriate",
+            "under"
+          ],
+          "description": "モデル・思考レベル・サブエージェント委譲が作業内容に見合っていたかの判定。"
+        },
+        "reason": {
+          "type": "string",
+          "description": "実際に使われたモデル・effort・委譲件数と、作業の難度を対比した根拠。子セッションの中身は見えていないので、子の内部品質を断定しないこと。"
+        }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "description": "オーナーシップ／理解度。understood=理解した上で指示・検収, partial=部分的, black_box=分かっていないまま丸投げ。",
+      "required": [
+        "level",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "understood",
+            "partial",
+            "black_box"
+          ],
+          "description": "内容を理解した上で指示し検収していたかの度合い。委譲そのものは悪ではなく、定型作業の委譲は合理的である。問題になるのは、何を任せたか理解しないまま結果を検収せずに受け取っている場合。"
+        },
+        "reason": {
+          "type": "string",
+          "description": "指示の具体性、検収の有無、理解を示す発話など、判定の根拠となる具体的な事実。"
+        }
+      }
+    },
+    "learning_value": {
+      "type": "string",
+      "enum": [
+        "none",
+        "some",
+        "high"
+      ],
+      "description": "学び・意思決定への寄与。コードなどの成果物が出なくても、理解が進んだり意思決定の材料が得られたセッションを拾うための軸。none=特に無し, some=多少あった, high=大きかった。"
+    },
+    "friction": {
+      "type": "array",
+      "description": "観察された具体的な摩擦点の箇条書き（空配列でもよい）。",
+      "items": {
+        "type": "string"
+      }
+    },
+    "outcome_summary": {
+      "type": "string",
+      "description": "セッション全体の短い要約（1〜3文程度）。"
+    },
+    "confidence": {
+      "type": "string",
+      "description": "情報が乏しく判断材料が不足している場合は低い confidence を返すこと。",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    }
+  }
+}

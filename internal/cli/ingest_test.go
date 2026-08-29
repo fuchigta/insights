@@ -1,0 +1,338 @@
+package cli
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/fuchigta/insights/internal/config"
+	"github.com/fuchigta/insights/internal/store"
+)
+
+// --- テスト用ヘルパ ---
+
+// runIngestCLI は NewRootCommand + newIngestCommand を組み合わせて実行する。
+// root.go 自体は変更していないため、この組み立ては毎回テスト側で行う。
+func runIngestCLI(t *testing.T, configPath, dbPath string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	root := NewRootCommand("test")
+	root.AddCommand(newIngestCommand())
+
+	var outBuf, errBuf bytes.Buffer
+	root.SetOut(&outBuf)
+	root.SetErr(&errBuf)
+
+	fullArgs := append([]string{"--config", configPath, "--db", dbPath, "ingest"}, args...)
+	root.SetArgs(fullArgs)
+
+	err = root.Execute()
+	return outBuf.String(), errBuf.String(), err
+}
+
+// writeJSONLine は v を 1 行の JSON として f に書き込む。
+func writeJSONLine(t *testing.T, f *os.File, v any) {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		t.Fatalf("write jsonl: %v", err)
+	}
+}
+
+// writeValidSession は Parse を通る最小限の Claude Code セッション jsonl を書き出す。
+func writeValidSession(t *testing.T, path, sessionID, cwd string, ts time.Time) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("os.Create: %v", err)
+	}
+	defer f.Close()
+
+	writeJSONLine(t, f, map[string]any{
+		"type":        "user",
+		"timestamp":   ts.Format(time.RFC3339Nano),
+		"cwd":         cwd,
+		"gitBranch":   "main",
+		"entrypoint":  "cli",
+		"isSidechain": false,
+		"sessionId":   sessionID,
+		"message":     map[string]any{"role": "user", "content": "テストプロンプト"},
+	})
+	writeJSONLine(t, f, map[string]any{
+		"type":        "assistant",
+		"timestamp":   ts.Add(time.Second).Format(time.RFC3339Nano),
+		"cwd":         cwd,
+		"gitBranch":   "main",
+		"entrypoint":  "cli",
+		"effort":      "high",
+		"isSidechain": false,
+		"sessionId":   sessionID,
+		"message": map[string]any{
+			"model":   "claude-sonnet-5",
+			"id":      "msg_" + sessionID,
+			"role":    "assistant",
+			"content": []map[string]any{{"type": "text", "text": "応答テキスト"}},
+			"usage": map[string]any{
+				"input_tokens":            100,
+				"output_tokens":           50,
+				"cache_read_input_tokens": 10,
+				"cache_creation":          map[string]any{"ephemeral_5m_input_tokens": 5, "ephemeral_1h_input_tokens": 0},
+				"service_tier":            "standard",
+			},
+		},
+	})
+}
+
+// writeBrokenSession は全行が壊れている jsonl を書き出す（Parse がエラーを返す想定）。
+func writeBrokenSession(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	content := "not a json line\n{broken\nanother bad line{{{\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+}
+
+// allSessionIDs は DB に保存済みの全セッション ID を返す（開始時刻の広い範囲で検索する）。
+func allSessionIDs(t *testing.T, dbPath string) []string {
+	t.Helper()
+	d, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer d.Close()
+
+	rows, err := d.SessionsInRange(time.Time{}, time.Date(2999, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("SessionsInRange: %v", err)
+	}
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.SessionID)
+	}
+	return ids
+}
+
+// testConfig は fakeHome を claude-code ソースのルートとし、成果物収集を無効化した
+// 設定ファイルを configPath に書き出す。excludedProject が空でなければ除外設定に加える。
+func writeTestConfig(t *testing.T, configPath, fakeHome, excludedProject string) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.Sources.ClaudeCode.Root = fakeHome
+	cfg.Evidence.Git = false
+	cfg.Evidence.Gh = config.TristateFalse
+	cfg.Evidence.Glab = config.TristateFalse
+	if excludedProject != "" {
+		cfg.Exclude.Projects = []string{excludedProject}
+	}
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("cfg.Save: %v", err)
+	}
+}
+
+// --- テスト本体 ---
+
+func TestIngest_BasicFlowExcludeAndBrokenFile(t *testing.T) {
+	tmp := t.TempDir()
+	fakeHome := filepath.Join(tmp, "claude")
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+
+	projA := filepath.Join(tmp, "proj-a")
+	projExcluded := filepath.Join(tmp, "proj-excluded")
+
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	writeValidSession(t, filepath.Join(fakeHome, "projects", "proj-a-slug", "11111111-1111-1111-1111-111111111111.jsonl"),
+		"11111111-1111-1111-1111-111111111111", projA, base)
+	writeValidSession(t, filepath.Join(fakeHome, "projects", "proj-excluded-slug", "22222222-2222-2222-2222-222222222222.jsonl"),
+		"22222222-2222-2222-2222-222222222222", projExcluded, base)
+	writeBrokenSession(t, filepath.Join(fakeHome, "projects", "proj-broken-slug", "33333333-3333-3333-3333-333333333333.jsonl"))
+
+	writeTestConfig(t, configPath, fakeHome, projExcluded)
+
+	stdout, stderr, err := runIngestCLI(t, configPath, dbPath, "--all", "--no-evidence")
+	if err != nil {
+		t.Fatalf("ingest --all --no-evidence error = %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	}
+	if stdout == "" {
+		t.Error("stdout が空（人間向け出力が無い）")
+	}
+
+	ids := allSessionIDs(t, dbPath)
+	if len(ids) != 1 {
+		t.Fatalf("取り込まれたセッション数 = %d, want 1（除外・壊れたファイルを除く）: %v", len(ids), ids)
+	}
+	if ids[0] != "11111111-1111-1111-1111-111111111111" {
+		t.Errorf("取り込まれたセッション ID = %q, want 11111111-1111-1111-1111-111111111111", ids[0])
+	}
+
+	// --- 冪等性: 2回目実行しても行数が増えない ---
+	stdout2, stderr2, err := runIngestCLI(t, configPath, dbPath, "--all", "--no-evidence")
+	if err != nil {
+		t.Fatalf("ingest 2回目 error = %v\nstdout=%s\nstderr=%s", err, stdout2, stderr2)
+	}
+	ids2 := allSessionIDs(t, dbPath)
+	if len(ids2) != 1 {
+		t.Fatalf("2回目実行後のセッション数 = %d, want 1（冪等性が壊れている）: %v", len(ids2), ids2)
+	}
+}
+
+func TestIngest_DryRunDoesNotWrite(t *testing.T) {
+	tmp := t.TempDir()
+	fakeHome := filepath.Join(tmp, "claude")
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+
+	projA := filepath.Join(tmp, "proj-a")
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	writeValidSession(t, filepath.Join(fakeHome, "projects", "proj-a-slug", "44444444-4444-4444-4444-444444444444.jsonl"),
+		"44444444-4444-4444-4444-444444444444", projA, base)
+
+	writeTestConfig(t, configPath, fakeHome, "")
+
+	stdout, stderr, err := runIngestCLI(t, configPath, dbPath, "--all", "--no-evidence", "--dry-run")
+	if err != nil {
+		t.Fatalf("ingest --dry-run error = %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	}
+
+	// dry-run では DB ファイル自体は store.Open が作るが、セッションは 1 件も保存されないはず。
+	ids := allSessionIDs(t, dbPath)
+	if len(ids) != 0 {
+		t.Fatalf("dry-run 実行後のセッション数 = %d, want 0: %v", len(ids), ids)
+	}
+}
+
+func TestIngest_SinceAndAllConflict(t *testing.T) {
+	tmp := t.TempDir()
+	fakeHome := filepath.Join(tmp, "claude")
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+
+	if err := os.MkdirAll(filepath.Join(fakeHome, "projects"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	writeTestConfig(t, configPath, fakeHome, "")
+
+	_, _, err := runIngestCLI(t, configPath, dbPath, "--all", "--since", "2026-01-01", "--no-evidence")
+	if err == nil {
+		t.Fatal("--all と --since を同時指定してもエラーにならなかった")
+	}
+}
+
+// TestIngest_SkipsEvalWorkspace は評価ワークスペース（~/.insights/judge-workspace）配下の
+// セッションが、ユーザー設定（exclude.projects）に頼らず常に取り込みから除外されることを検証する。
+// 実際の ~/.insights には触れないよう、USERPROFILE/HOME を一時ディレクトリに差し替える。
+func TestIngest_SkipsEvalWorkspace(t *testing.T) {
+	tmp := t.TempDir()
+	fakeHome := filepath.Join(tmp, "home")
+	t.Setenv("USERPROFILE", fakeHome)
+	t.Setenv("HOME", fakeHome)
+
+	fakeClaudeHome := filepath.Join(tmp, "claude")
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+
+	projA := filepath.Join(tmp, "proj-a")
+	// judge-workspace は $USERPROFILE/.insights/judge-workspace（claudecli.Judge の既定と同じ規約）。
+	judgeWorkspaceProj := filepath.Join(fakeHome, ".insights", "judge-workspace")
+
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	writeValidSession(t, filepath.Join(fakeClaudeHome, "projects", "proj-a-slug", "66666666-6666-6666-6666-666666666666.jsonl"),
+		"66666666-6666-6666-6666-666666666666", projA, base)
+	writeValidSession(t, filepath.Join(fakeClaudeHome, "projects", "judge-ws-slug", "77777777-7777-7777-7777-777777777777.jsonl"),
+		"77777777-7777-7777-7777-777777777777", judgeWorkspaceProj, base)
+
+	writeTestConfig(t, configPath, fakeClaudeHome, "")
+
+	stdout, stderr, err := runIngestCLI(t, configPath, dbPath, "--all", "--no-evidence")
+	if err != nil {
+		t.Fatalf("ingest --all --no-evidence error = %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	}
+
+	ids := allSessionIDs(t, dbPath)
+	if len(ids) != 1 {
+		t.Fatalf("取り込まれたセッション数 = %d, want 1（評価ワークスペース配下を除く）: %v", len(ids), ids)
+	}
+	if ids[0] != "66666666-6666-6666-6666-666666666666" {
+		t.Errorf("取り込まれたセッション ID = %q, want proj-a のセッション", ids[0])
+	}
+
+	var result ingestResult
+	if !strings.Contains(stdout, "insights ingest") {
+		t.Fatalf("stdout に人間向け出力が見当たらない: %s", stdout)
+	}
+
+	root := NewRootCommand("test")
+	root.AddCommand(newIngestCommand())
+	var outBuf, errBuf bytes.Buffer
+	root.SetOut(&outBuf)
+	root.SetErr(&errBuf)
+	root.SetArgs([]string{"--config", configPath, "--db", dbPath, "--json", "ingest", "--all", "--no-evidence"})
+	// 2回目実行（冪等性の確認を兼ねる）。JSON 出力で SkippedJudgeWorkspace を確認する。
+	if err := root.Execute(); err != nil {
+		t.Fatalf("ingest --json error = %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
+	}
+	if err := json.Unmarshal(outBuf.Bytes(), &result); err != nil {
+		t.Fatalf("stdout の JSON デコードに失敗しました: %v\nstdout=%s", err, outBuf.String())
+	}
+	if result.SkippedJudgeWorkspace != 1 {
+		t.Errorf("result.SkippedJudgeWorkspace = %d, want 1", result.SkippedJudgeWorkspace)
+	}
+}
+
+func TestIngest_JSONOutput(t *testing.T) {
+	tmp := t.TempDir()
+	fakeHome := filepath.Join(tmp, "claude")
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+
+	projA := filepath.Join(tmp, "proj-a")
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	writeValidSession(t, filepath.Join(fakeHome, "projects", "proj-a-slug", "55555555-5555-5555-5555-555555555555.jsonl"),
+		"55555555-5555-5555-5555-555555555555", projA, base)
+	writeTestConfig(t, configPath, fakeHome, "")
+
+	root := NewRootCommand("test")
+	root.AddCommand(newIngestCommand())
+	var outBuf, errBuf bytes.Buffer
+	root.SetOut(&outBuf)
+	root.SetErr(&errBuf)
+	root.SetArgs([]string{"--config", configPath, "--db", dbPath, "--json", "ingest", "--all", "--no-evidence"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("ingest --json error = %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
+	}
+
+	var result ingestResult
+	if err := json.Unmarshal(outBuf.Bytes(), &result); err != nil {
+		t.Fatalf("stdout の JSON デコードに失敗しました: %v\nstdout=%s", err, outBuf.String())
+	}
+	if result.Ingested != 1 {
+		t.Errorf("result.Ingested = %d, want 1", result.Ingested)
+	}
+	if result.Discovered != 1 {
+		t.Errorf("result.Discovered = %d, want 1", result.Discovered)
+	}
+	if result.EstimatedCostUSD <= 0 {
+		t.Errorf("result.EstimatedCostUSD = %f, want > 0（claude-sonnet-5 は単価が既知）", result.EstimatedCostUSD)
+	}
+	if len(result.UnknownModels) != 0 {
+		t.Errorf("result.UnknownModels = %v, want 空", result.UnknownModels)
+	}
+
+	// --json 指定時は標準出力が JSON のみであること（進捗ログ等が混ざっていない）。
+	if errBuf.Len() == 0 {
+		t.Error("stderr が空: 進捗ログが標準エラーに出ていない可能性がある")
+	}
+}

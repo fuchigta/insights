@@ -1,0 +1,389 @@
+{
+  "date": "2026-08-29",
+  "generated_at": "2026-08-29T20:15:00+09:00",
+  "totals": {
+    "sessions": 4,
+    "interactive_sessions": 3,
+    "automated_sessions": 0,
+    "sidechain_sessions": 1,
+    "duration_minutes": 95.75,
+    "input_tokens": 2250,
+    "output_tokens": 4180,
+    "cache_read_tokens": 750,
+    "cache_write_tokens": 150,
+    "cost_usd": 0.1754,
+    "cache_reuse_ratio": 5.0,
+    "unpriced_events": 2
+  },
+  "by_model": [
+    {
+      "model": "claude-sonnet-5",
+      "sessions": 2,
+      "responses": 6,
+      "input_tokens": 1050,
+      "output_tokens": 2080,
+      "cache_read_tokens": 550,
+      "cache_write_tokens": 100,
+      "cost_usd": 0.1254,
+      "priced": true
+    },
+    {
+      "model": "claude-opus-5",
+      "sessions": 1,
+      "responses": 3,
+      "input_tokens": 800,
+      "output_tokens": 1500,
+      "cache_read_tokens": 200,
+      "cache_write_tokens": 50,
+      "cost_usd": 0.05,
+      "priced": true
+    },
+    {
+      "model": "totally-unknown-model-9000",
+      "sessions": 1,
+      "responses": 2,
+      "input_tokens": 400,
+      "output_tokens": 600,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0,
+      "priced": false
+    }
+  ],
+  "by_project": [
+    {
+      "project_path": "C:\\Users\\fuchigta\\projects\\insights",
+      "project_label": "insights",
+      "sessions": 1,
+      "duration_minutes": 45.5,
+      "cost_usd": 0.1234,
+      "cost_share": 0.7035,
+      "goal": "リリースの安定化",
+      "evaluated_sessions": 1,
+      "facets": {
+        "outcome": { "achieved": 1 },
+        "artifact_value": { "durable": 1 },
+        "intervention_cost": { "low": 1 },
+        "model_fit": { "appropriate": 1 },
+        "ownership": { "understood": 1 },
+        "learning_value": { "some": 1 },
+        "goal_category": { "bugfix": 1 },
+        "confidence": { "high": 1 },
+        "rework_occurred": 1
+      },
+      "achieved_ratio": 1,
+      "highlights": [
+        {
+          "session_id": "session-a",
+          "project_label": "insights",
+          "title": "fix: outlier finding :bug",
+          "first_prompt": "outlierの検出ロジックを直して",
+          "started_at": "2026-08-29T09:00:00+09:00",
+          "duration_minutes": 45.5,
+          "is_sidechain": false,
+          "entrypoint": "cli",
+          "models": ["claude-sonnet-5"],
+          "cost_usd": 0.1234,
+          "priced": true,
+          "evidence_count": 2,
+          "eval": {
+            "underlying_goal": "outlier検出のバグを直す",
+            "goal_category": "bugfix",
+            "outcome": "achieved",
+            "artifact_value": "durable",
+            "intervention_cost": {
+              "level": "low",
+              "evidence": "ほぼ自動で完了した"
+            },
+            "rework": {
+              "occurred": true,
+              "cause": "最初の実装で閾値を誤った"
+            },
+            "model_fit": {
+              "verdict": "appropriate",
+              "reason": "複雑度に対して妥当なモデルだった"
+            },
+            "ownership": {
+              "level": "understood",
+              "reason": "差分をすべて確認した"
+            },
+            "learning_value": "some",
+            "friction": ["閾値の初期値が分かりづらかった"],
+            "outcome_summary": "outlier検出のしきい値バグを修正し、テストを追加して完了した。",
+            "confidence": "high"
+          },
+          "child_sessions": 0,
+          "child_cost_usd": 0,
+          "total_cost_usd": 0.1234
+        }
+      ],
+      "rolled_up": {
+        "sessions": 0,
+        "duration_minutes": 0,
+        "cost_usd": 0
+      },
+      "review": {
+        "verdict": "worth_it",
+        "summary": "outlier検出のしきい値バグを session-a でほぼ自動的に修正し、テストも追加された。資産として残る成果物になっており、投じたコストに見合っている。",
+        "improvement": ""
+      }
+    },
+    {
+      "project_path": "C:\\Users\\fuchigta\\projects\\estimate-dashboard",
+      "project_label": "見積もりダッシュボード",
+      "sessions": 2,
+      "duration_minutes": 45.25,
+      "cost_usd": 0.05,
+      "cost_share": 0.2851,
+      "evaluated_sessions": 1,
+      "facets": {
+        "outcome": { "partial": 1 },
+        "artifact_value": { "transient": 1 },
+        "intervention_cost": { "medium": 1 },
+        "model_fit": { "over": 1 },
+        "ownership": { "partial": 1 },
+        "learning_value": { "some": 1 },
+        "goal_category": { "research": 1 },
+        "confidence": { "medium": 1 },
+        "rework_occurred": 0
+      },
+      "achieved_ratio": 0,
+      "highlights": [
+        {
+          "session_id": "session-b",
+          "project_label": "見積もりダッシュボード",
+          "title": "",
+          "first_prompt": "見積もりダッシュボードの技術選定をして",
+          "started_at": "2026-08-29T13:00:00+09:00",
+          "duration_minutes": 30,
+          "is_sidechain": false,
+          "entrypoint": "cli",
+          "models": ["claude-opus-5"],
+          "cost_usd": 0.05,
+          "priced": true,
+          "evidence_count": 0,
+          "eval": {
+            "underlying_goal": "見積もりダッシュボードの技術選定",
+            "goal_category": "research",
+            "outcome": "partial",
+            "artifact_value": "transient",
+            "intervention_cost": {
+              "level": "medium",
+              "evidence": "複数回の方針転換があった"
+            },
+            "rework": {
+              "occurred": false,
+              "cause": ""
+            },
+            "model_fit": {
+              "verdict": "over",
+              "reason": "調査タスクにはより軽量なモデルで十分だった"
+            },
+            "ownership": {
+              "level": "partial",
+              "reason": "一部の選定理由をAIに委ねた"
+            },
+            "learning_value": "some",
+            "friction": [],
+            "outcome_summary": "技術選定の候補を3つ|Aプラン/Bプラン/Cプランに絞ったが最終決定には至らなかった。",
+            "confidence": "medium"
+          },
+          "child_sessions": 1,
+          "child_cost_usd": 0,
+          "total_cost_usd": 0.05
+        }
+      ],
+      "rolled_up": {
+        "sessions": 0,
+        "duration_minutes": 0,
+        "cost_usd": 0
+      },
+      "review": {
+        "verdict": "mixed",
+        "summary": "session-b は技術選定の候補を3つに絞ったが最終決定には至らず、成果物はその場限りで消費された。調査タスクに対してOpusは過剰であり、委譲した下調べ用のサブエージェント（unknown-modelを使用）は検収されないまま終わっている。",
+        "improvement": "次回は軽量モデルに下調べを任せてから Opus に引き継ぐ"
+      }
+    },
+    {
+      "project_path": "/mnt/c/projects/sandbox-experiment",
+      "project_label": "サンドボックス実験",
+      "sessions": 1,
+      "duration_minutes": 5,
+      "cost_usd": 0.002,
+      "cost_share": 0.0114,
+      "evaluated_sessions": 0,
+      "facets": {},
+      "achieved_ratio": -1,
+      "highlights": [],
+      "rolled_up": {
+        "sessions": 1,
+        "duration_minutes": 5,
+        "cost_usd": 0.002,
+        "reason": "評価データが無く、コスト・時間も小さいため個別掲載を見送り"
+      },
+      "review": {
+        "verdict": "insufficient_data",
+        "summary": "評価データが無く、コストに見合ったかどうか判断できない。",
+        "improvement": ""
+      }
+    }
+  ],
+  "sessions": [
+    {
+      "session_id": "session-a",
+      "project_label": "insights",
+      "title": "fix: outlier finding :bug",
+      "first_prompt": "outlierの検出ロジックを直して",
+      "started_at": "2026-08-29T09:00:00+09:00",
+      "duration_minutes": 45.5,
+      "is_sidechain": false,
+      "entrypoint": "cli",
+      "models": ["claude-sonnet-5"],
+      "cost_usd": 0.1234,
+      "priced": true,
+      "evidence_count": 2,
+      "eval": {
+        "underlying_goal": "outlier検出のバグを直す",
+        "goal_category": "bugfix",
+        "outcome": "achieved",
+        "artifact_value": "durable",
+        "intervention_cost": { "level": "low", "evidence": "ほぼ自動で完了した" },
+        "rework": { "occurred": true, "cause": "最初の実装で閾値を誤った" },
+        "model_fit": { "verdict": "appropriate", "reason": "複雑度に対して妥当なモデルだった" },
+        "ownership": { "level": "understood", "reason": "差分をすべて確認した" },
+        "learning_value": "some",
+        "friction": ["閾値の初期値が分かりづらかった"],
+        "outcome_summary": "outlier検出のしきい値バグを修正し、テストを追加して完了した。",
+        "confidence": "high"
+      },
+      "child_sessions": 0,
+      "child_cost_usd": 0,
+      "total_cost_usd": 0.1234
+    },
+    {
+      "session_id": "session-b",
+      "project_label": "見積もりダッシュボード",
+      "title": "",
+      "first_prompt": "見積もりダッシュボードの技術選定をして",
+      "started_at": "2026-08-29T13:00:00+09:00",
+      "duration_minutes": 30,
+      "is_sidechain": false,
+      "entrypoint": "cli",
+      "models": ["claude-opus-5"],
+      "cost_usd": 0.05,
+      "priced": true,
+      "evidence_count": 0,
+      "eval": {
+        "underlying_goal": "見積もりダッシュボードの技術選定",
+        "goal_category": "research",
+        "outcome": "partial",
+        "artifact_value": "transient",
+        "intervention_cost": { "level": "medium", "evidence": "複数回の方針転換があった" },
+        "rework": { "occurred": false, "cause": "" },
+        "model_fit": { "verdict": "over", "reason": "調査タスクにはより軽量なモデルで十分だった" },
+        "ownership": { "level": "partial", "reason": "一部の選定理由をAIに委ねた" },
+        "learning_value": "some",
+        "friction": [],
+        "outcome_summary": "技術選定の候補を3つ|Aプラン/Bプラン/Cプランに絞ったが最終決定には至らなかった。",
+        "confidence": "medium"
+      },
+      "child_sessions": 1,
+      "child_cost_usd": 0,
+      "total_cost_usd": 0.05
+    },
+    {
+      "session_id": "session-d",
+      "project_label": "サンドボックス実験",
+      "title": "",
+      "first_prompt": "新しいCLIフレームワークを試したい",
+      "started_at": "2026-08-29T19:00:00+09:00",
+      "duration_minutes": 5,
+      "is_sidechain": false,
+      "entrypoint": "cli",
+      "models": ["claude-sonnet-5"],
+      "cost_usd": 0.002,
+      "priced": true,
+      "evidence_count": 0,
+      "child_sessions": 0,
+      "child_cost_usd": 0,
+      "total_cost_usd": 0.002
+    }
+  ],
+  "facets": {
+    "outcome": { "achieved": 1, "partial": 1 },
+    "artifact_value": { "durable": 1, "transient": 1 },
+    "intervention_cost": { "low": 1, "medium": 1 },
+    "model_fit": { "appropriate": 1, "over": 1 },
+    "ownership": { "understood": 1, "partial": 1 },
+    "learning_value": { "some": 2 },
+    "goal_category": { "bugfix": 1, "research": 1 },
+    "confidence": { "high": 1, "medium": 1 },
+    "rework_occurred": 1
+  },
+  "narrative": {
+    "headline": "リリース準備とダッシュボード見積もりを進めた",
+    "body": "## 今日の要点\n\n- insights の outlier 検出バグを修正した\n- 見積もりダッシュボードの技術調査を進めた\n",
+    "highlights": [
+      "insights の outlier 検出バグを修正",
+      "見積もりダッシュボードの技術調査を実施"
+    ]
+  },
+  "retro": {
+    "headline": "insights のバグ修正では投じたコストに見合う資産価値が出た一方、見積もりダッシュボードの技術調査は成果物がその場限りで消費され、委譲した下調べも検収されないまま終わっており、コストに見合ったとは言い切れない。全体としては一部見合った1日。",
+    "verdict": "mixed",
+    "body": "## 全体所感\n\nモデル選択は概ね妥当だったが、見積もりダッシュボードの調査タスクに Opus を使ったのは過剰だった。\n",
+    "cost_observation": "cache_read_tokens が費用の大半を占めているが、cache_reuse_ratio が 5.0 と高く、文脈を安く再利用できている。むしろ懸念はコストの大きさではなく、委譲した調査セッションが検収されないまま終わっている点。",
+    "proposals": [
+      {
+        "title": "未知モデルの単価を prices.json に追加する",
+        "detail": "totally-unknown-model-9000 の単価を確認して登録する",
+        "category": "pricing"
+      },
+      {
+        "title": "モデルが過剰と判定されたタスクは軽量モデルに下調べさせる",
+        "detail": "見積もりダッシュボードのような調査タスクでは、着手前に軽量モデルで下書きさせてから Opus に引き継ぐ",
+        "category": "process"
+      }
+    ],
+    "verifications": [
+      {
+        "action_id": 1,
+        "title": "コミットメッセージに Issue 番号を含める",
+        "status": "done",
+        "verdict": "直近3件のコミットで実施を確認した"
+      }
+    ],
+    "outliers": [
+      {
+        "session_id": "session-d",
+        "cost_usd": 0.002,
+        "reason": "評価できていないため費用対効果が不明"
+      }
+    ],
+    "project_reviews": {
+      "C:\\Users\\fuchigta\\projects\\insights": {
+        "verdict": "worth_it",
+        "summary": "outlier検出のしきい値バグを session-a でほぼ自動的に修正し、テストも追加された。資産として残る成果物になっており、投じたコストに見合っている。",
+        "improvement": ""
+      },
+      "C:\\Users\\fuchigta\\projects\\estimate-dashboard": {
+        "verdict": "mixed",
+        "summary": "session-b は技術選定の候補を3つに絞ったが最終決定には至らず、成果物はその場限りで消費された。調査タスクに対してOpusは過剰であり、委譲した下調べ用のサブエージェントは検収されないまま終わっている。",
+        "improvement": "次回は軽量モデルに下調べを任せてから Opus に引き継ぐ"
+      },
+      "/mnt/c/projects/sandbox-experiment": {
+        "verdict": "insufficient_data",
+        "summary": "評価データが無く、コストに見合ったかどうか判断できない。",
+        "improvement": ""
+      }
+    }
+  },
+  "meta": {
+    "prompt_version": "2026-01-01",
+    "unknown_models": ["totally-unknown-model-9000"],
+    "unevaluated_sessions": 2,
+    "missing_transcripts": 0,
+    "judge_cost_usd": 0.0123,
+    "judge_session_ids": ["judge-session-1"]
+  }
+}

@@ -1,0 +1,222 @@
+{
+  "from": "2026-08-20",
+  "to": "2026-08-29",
+  "points": [
+    {
+      "date": "2026-08-20",
+      "sessions": 3,
+      "duration_minutes": 120,
+      "cost_usd": 0.30,
+      "cost_by_model": { "claude-sonnet-5": 0.20, "claude-opus-5": 0.10 },
+      "outcome": { "achieved": 1, "partial": 1, "exploratory": 1 },
+      "model_fit": { "over": 2, "appropriate": 1 },
+      "ownership": { "partial": 2, "black_box": 1 },
+      "achieved_ratio": 0.3333333333333333
+    },
+    {
+      "date": "2026-08-21",
+      "sessions": 2,
+      "duration_minutes": 80,
+      "cost_usd": 0.15,
+      "cost_by_model": { "claude-sonnet-5": 0.15 },
+      "outcome": { "achieved": 1, "abandoned": 1 },
+      "model_fit": { "over": 1, "under": 1 },
+      "ownership": { "understood": 1, "partial": 1 },
+      "achieved_ratio": 0.5
+    },
+    {
+      "date": "2026-08-22",
+      "sessions": 1,
+      "duration_minutes": 30,
+      "cost_usd": 0.05,
+      "cost_by_model": { "claude-haiku-5": 0.05 },
+      "outcome": {},
+      "model_fit": {},
+      "ownership": {},
+      "achieved_ratio": -1
+    },
+    {
+      "date": "2026-08-24",
+      "sessions": 4,
+      "duration_minutes": 150,
+      "cost_usd": 0.35,
+      "cost_by_model": { "claude-sonnet-5": 0.25, "claude-opus-5": 0.10, "totally-unknown-model-9000": 0 },
+      "outcome": { "achieved": 2, "partial": 1, "exploratory": 1 },
+      "model_fit": { "over": 1, "appropriate": 2, "under": 1 },
+      "ownership": { "understood": 2, "partial": 1, "black_box": 1 },
+      "achieved_ratio": 0.5
+    },
+    {
+      "date": "2026-08-25",
+      "sessions": 2,
+      "duration_minutes": 60,
+      "cost_usd": 0.12,
+      "cost_by_model": { "claude-sonnet-5": 0.12 },
+      "outcome": { "achieved": 1, "partial": 1 },
+      "model_fit": { "appropriate": 2 },
+      "ownership": { "understood": 2 },
+      "achieved_ratio": 0.5
+    },
+    {
+      "date": "2026-08-27",
+      "sessions": 3,
+      "duration_minutes": 100,
+      "cost_usd": 0.20,
+      "cost_by_model": { "claude-sonnet-5": 0.10, "claude-opus-5": 0.10 },
+      "outcome": { "achieved": 2, "exploratory": 1 },
+      "model_fit": { "appropriate": 2, "under": 1 },
+      "ownership": { "understood": 3 },
+      "achieved_ratio": 0.6666666666666666
+    },
+    {
+      "date": "2026-08-28",
+      "sessions": 2,
+      "duration_minutes": 70,
+      "cost_usd": 0.10,
+      "cost_by_model": { "claude-sonnet-5": 0.10 },
+      "outcome": { "achieved": 1, "partial": 1 },
+      "model_fit": { "appropriate": 1, "under": 1 },
+      "ownership": { "understood": 1, "partial": 1 },
+      "achieved_ratio": 0.5
+    },
+    {
+      "date": "2026-08-29",
+      "sessions": 3,
+      "duration_minutes": 90,
+      "cost_usd": 0.18,
+      "cost_by_model": { "claude-sonnet-5": 0.13, "claude-haiku-5": 0.05 },
+      "outcome": { "achieved": 2, "abandoned": 1 },
+      "model_fit": { "appropriate": 2, "under": 1 },
+      "ownership": { "understood": 2, "black_box": 1 },
+      "achieved_ratio": 0.6666666666666666
+    }
+  ],
+  "by_model": [
+    {
+      "model": "claude-sonnet-5",
+      "sessions": 8,
+      "responses": 40,
+      "input_tokens": 50000,
+      "output_tokens": 80000,
+      "cache_read_tokens": 900000,
+      "cache_write_tokens": 150000,
+      "cost_usd": 1.05,
+      "priced": true
+    },
+    {
+      "model": "claude-opus-5",
+      "sessions": 3,
+      "responses": 15,
+      "input_tokens": 20000,
+      "output_tokens": 30000,
+      "cache_read_tokens": 300000,
+      "cache_write_tokens": 50000,
+      "cost_usd": 0.30,
+      "priced": true
+    },
+    {
+      "model": "claude-haiku-5",
+      "sessions": 2,
+      "responses": 8,
+      "input_tokens": 10000,
+      "output_tokens": 15000,
+      "cache_read_tokens": 50000,
+      "cache_write_tokens": 10000,
+      "cost_usd": 0.10,
+      "priced": true
+    },
+    {
+      "model": "totally-unknown-model-9000",
+      "sessions": 1,
+      "responses": 3,
+      "input_tokens": 5000,
+      "output_tokens": 8000,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0,
+      "priced": false
+    }
+  ],
+  "actions": [
+    {
+      "ID": 1,
+      "CreatedOn": "2026-08-20",
+      "Title": "コミットメッセージにIssue番号を含める",
+      "Detail": "レビューしやすくするため",
+      "Category": "process",
+      "Status": "done",
+      "Verdict": "直近3件のコミットで実施を確認できた",
+      "VerifiedOn": "2026-08-25"
+    },
+    {
+      "ID": 2,
+      "CreatedOn": "2026-08-20",
+      "Title": "<script>alert(1)</script> を含む提案タイトルのテスト",
+      "Detail": "C:\\Users\\fuchigta\\projects\\insights のWindowsパスを含むテスト用の詳細",
+      "Category": "security",
+      "Status": "open",
+      "Verdict": "",
+      "VerifiedOn": ""
+    },
+    {
+      "ID": 3,
+      "CreatedOn": "2026-08-21",
+      "Title": "未知モデルの単価をprices.jsonに追加する",
+      "Detail": "totally-unknown-model-9000 の単価を確認して登録する",
+      "Category": "pricing",
+      "Status": "open",
+      "Verdict": "",
+      "VerifiedOn": ""
+    },
+    {
+      "ID": 4,
+      "CreatedOn": "2026-08-22",
+      "Title": "レビュー前にセルフチェックリストを回す",
+      "Detail": "手戻りが発生したセッションがあったため",
+      "Category": "process",
+      "Status": "dropped",
+      "Verdict": "実施コストが高すぎるため見送りとした",
+      "VerifiedOn": "2026-08-24"
+    },
+    {
+      "ID": 5,
+      "CreatedOn": "2026-08-24",
+      "Title": "長時間セッションを分割する",
+      "Detail": "90分を超えるセッションは分割を検討する",
+      "Category": "process",
+      "Status": "open",
+      "Verdict": "",
+      "VerifiedOn": ""
+    },
+    {
+      "ID": 6,
+      "CreatedOn": "2026-08-25",
+      "Title": "見積もりダッシュボードのREADMEを整備する",
+      "Detail": "日本語プロジェクト名を含むテスト用の詳細説明文",
+      "Category": "docs",
+      "Status": "expired",
+      "Verdict": "期限までに着手されず期限切れとなった",
+      "VerifiedOn": "2026-08-29"
+    },
+    {
+      "ID": 7,
+      "CreatedOn": "2026-08-27",
+      "Title": "モデル選定基準をドキュメント化する",
+      "Detail": "model_fit の over が多かったため",
+      "Category": "process",
+      "Status": "open",
+      "Verdict": "",
+      "VerifiedOn": ""
+    },
+    {
+      "ID": 8,
+      "CreatedOn": "2026-08-28",
+      "Title": "キャッシュ書き込みを減らす工夫を検討する",
+      "Detail": "コスト内訳でcache writeの割合が大きいため",
+      "Category": "cost",
+      "Status": "open",
+      "Verdict": "",
+      "VerifiedOn": ""
+    }
+  ]
+}

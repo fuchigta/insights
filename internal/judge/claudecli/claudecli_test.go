@@ -1,0 +1,160 @@
+package claudecli
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/fuchigta/insights/internal/judge"
+)
+
+func TestName(t *testing.T) {
+	j := New(Options{})
+	if got := j.Name(); got != "claude-cli" {
+		t.Errorf("Name() = %q, want claude-cli", got)
+	}
+}
+
+func TestNew_Defaults(t *testing.T) {
+	j := New(Options{})
+	if j.opts.Timeout != defaultTimeout {
+		t.Errorf("Timeout = %v, want %v", j.opts.Timeout, defaultTimeout)
+	}
+	if j.opts.BinPath != defaultBin {
+		t.Errorf("BinPath = %q, want %q", j.opts.BinPath, defaultBin)
+	}
+
+	j2 := New(Options{Timeout: 5 * time.Second, BinPath: "custom-claude"})
+	if j2.opts.Timeout != 5*time.Second {
+		t.Errorf("Timeout override が効いていない: %v", j2.opts.Timeout)
+	}
+	if j2.opts.BinPath != "custom-claude" {
+		t.Errorf("BinPath override が効いていない: %v", j2.opts.BinPath)
+	}
+}
+
+func TestAvailable(t *testing.T) {
+	t.Run("存在しないパス", func(t *testing.T) {
+		j := New(Options{BinPath: filepath.Join(t.TempDir(), "does-not-exist-claude.exe")})
+		if err := j.Available(); err == nil {
+			t.Fatal("Available() = nil, want error")
+		}
+	})
+
+	t.Run("実在するファイルパス", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "fake-claude")
+		if err := os.WriteFile(f, []byte("dummy"), 0o755); err != nil {
+			t.Fatalf("テスト用ファイルの作成に失敗: %v", err)
+		}
+		j := New(Options{BinPath: f})
+		if err := j.Available(); err != nil {
+			t.Errorf("Available() = %v, want nil", err)
+		}
+	})
+
+	t.Run("PATHに存在しないコマンド名", func(t *testing.T) {
+		j := New(Options{BinPath: "insights-definitely-not-a-real-command-xyz"})
+		if err := j.Available(); err == nil {
+			t.Fatal("Available() = nil, want error")
+		}
+	})
+}
+
+func TestLastRunAndRuns_EmptyInitially(t *testing.T) {
+	j := New(Options{})
+	if got := j.LastRun(); got != (RunInfo{}) {
+		t.Errorf("LastRun() 初期状態 = %+v, want zero value", got)
+	}
+	if got := j.Runs(); len(got) != 0 {
+		t.Errorf("Runs() 初期状態 = %+v, want empty", got)
+	}
+}
+
+func TestRecordRun_AccumulatesAndIsConcurrencySafe(t *testing.T) {
+	j := New(Options{})
+
+	const n = 50
+	done := make(chan struct{})
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			j.recordRun(RunInfo{SessionID: "s"})
+			done <- struct{}{}
+		}(i)
+	}
+	for i := 0; i < n; i++ {
+		<-done
+	}
+
+	if got := len(j.Runs()); got != n {
+		t.Errorf("Runs() の件数 = %d, want %d", got, n)
+	}
+}
+
+func TestBuildSystemPrompt(t *testing.T) {
+	req := judge.Request{
+		System: "ROLE-INSTRUCTIONS",
+		Schema: json.RawMessage(`{"type":"object"}`),
+	}
+	got := buildSystemPrompt(req)
+	if !strings.Contains(got, "ROLE-INSTRUCTIONS") {
+		t.Errorf("system prompt に System が含まれていない: %q", got)
+	}
+	if !strings.Contains(got, `"type":"object"`) {
+		t.Errorf("system prompt に Schema が含まれていない: %q", got)
+	}
+
+	// System が空でも panic しない。
+	got2 := buildSystemPrompt(judge.Request{Schema: json.RawMessage(`{}`)})
+	if !strings.Contains(got2, "{}") {
+		t.Errorf("System 空でも Schema は含まれるべき: %q", got2)
+	}
+}
+
+// TestEvaluate_RealCLI は実際に claude を起動する結合テスト。
+// コストが発生するため、既定では必ずスキップする。実行するには
+// INSIGHTS_TEST_REAL_CLI=1 を明示的にセットし、かつ -short を付けないこと。
+// さらに claude が PATH に無ければ（CI 環境など）スキップする。
+func TestEvaluate_RealCLI(t *testing.T) {
+	if testing.Short() {
+		t.Skip("short モードのため実 CLI テストをスキップ")
+	}
+	if os.Getenv("INSIGHTS_TEST_REAL_CLI") != "1" {
+		t.Skip("INSIGHTS_TEST_REAL_CLI=1 が設定されていないためスキップ（コストが発生するため既定オフ）")
+	}
+	if _, err := exec.LookPath("claude"); err != nil {
+		t.Skip("claude が PATH に見つからないためスキップ")
+	}
+
+	j := New(Options{Model: "claude-haiku-4-5", Timeout: 60 * time.Second})
+
+	req := judge.Request{
+		System: "You are a test responder. Reply with JSON only.",
+		Prompt: `Reply with exactly this JSON object and nothing else: {"ok": true, "message": "hello"}`,
+		Schema: json.RawMessage(`{"type":"object","required":["ok","message"]}`),
+		Model:  "claude-haiku-4-5",
+	}
+
+	out, err := j.Evaluate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		t.Fatalf("Evaluate() が有効な JSON を返さなかった: %v (%s)", err, out)
+	}
+	if _, ok := parsed["ok"]; !ok {
+		t.Errorf("Evaluate() 結果に ok フィールドがない: %s", out)
+	}
+
+	run := j.LastRun()
+	if run.SessionID == "" {
+		t.Errorf("LastRun().SessionID が空: %+v", run)
+	}
+	t.Logf("RunInfo: %+v", run)
+}

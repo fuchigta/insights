@@ -1,0 +1,300 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/fuchigta/insights/internal/config"
+	"github.com/fuchigta/insights/internal/judge"
+	"github.com/fuchigta/insights/internal/pricing"
+	"github.com/spf13/cobra"
+)
+
+// fakeDailyJudge は judge.Judge のテスト用フェイク実装。実際の claude サブプロセスは呼ばない。
+// セッション評価（Schema が prompts.SessionEvalSchema と一致）と、日報・振り返り生成
+// （rollup.Synthesize が呼ぶ。Schema は非公開のため呼び出し順で判別する）の両方に応答する。
+//
+// runDaily の実装上、セッション評価（evaluateSessions）はすべて完了してから
+// rollup.Synthesize が呼ばれ、その中で日報 -> 振り返りの順に逐次呼ばれることが保証されている
+// （rollup.Synthesize のソースコード参照）。そのため「セッション評価以外の呼び出しのうち
+// 1回目が日報、2回目が振り返り」という判別で安全に対応できる。
+type fakeDailyJudge struct {
+	mu              sync.Mutex
+	sessionCalls    int
+	nonSessionCalls int
+}
+
+func (f *fakeDailyJudge) Name() string     { return "fake-daily-judge" }
+func (f *fakeDailyJudge) Available() error { return nil }
+
+func (f *fakeDailyJudge) Evaluate(_ context.Context, req judge.Request) (json.RawMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if strings.Contains(req.Prompt, "## セッション基本情報") {
+		f.sessionCalls++
+		return validEvalJSON("achieved"), nil
+	}
+
+	f.nonSessionCalls++
+	if f.nonSessionCalls == 1 {
+		return validDailyJSON(), nil
+	}
+	return validRetroJSON(), nil
+}
+
+func newDailyTestCmd(t *testing.T) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{}
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	return cmd
+}
+
+func TestDaily_WritesTwoMarkdownFilesAndExcludesSidechain(t *testing.T) {
+	db := newTempDB(t)
+	outDir := t.TempDir()
+	cfg := config.Default()
+	cfg.Output.Dir = outDir
+	cfg.Judge.Concurrency = 2
+
+	date := "2026-08-20"
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+
+	saveTestSession(t, db, testSessionSpec{
+		SessionID: "parent-1", ProjectPath: "/proj-a", ProjectLabel: "proj-a",
+		Title: "親セッション", FirstPrompt: "fix the bug",
+		StartedAt: base, EndedAt: base.Add(10 * time.Minute), CostUSD: 0.10, CostKnown: true,
+	})
+	saveTestSession(t, db, testSessionSpec{
+		SessionID: "child-1", IsSidechain: true, ParentSessionID: "parent-1",
+		ProjectPath: "/proj-a", ProjectLabel: "proj-a",
+		Title: "サブエージェント", FirstPrompt: "sub task",
+		StartedAt: base.Add(time.Minute), EndedAt: base.Add(3 * time.Minute), CostUSD: 0.02, CostKnown: true,
+	})
+
+	dayStart, dayEnd, err := dayRange(date)
+	if err != nil {
+		t.Fatalf("dayRange() error = %v", err)
+	}
+	rows, err := db.SessionsInRange(dayStart, dayEnd)
+	if err != nil {
+		t.Fatalf("SessionsInRange() error = %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("前提: rows の件数 = %d, want 2", len(rows))
+	}
+
+	prices, err := pricing.Load(nil)
+	if err != nil {
+		t.Fatalf("pricing.Load() error = %v", err)
+	}
+
+	fj := &fakeDailyJudge{}
+	cmd := newDailyTestCmd(t)
+
+	result, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, false, true)
+	if err != nil {
+		t.Fatalf("runDaily() error = %v", err)
+	}
+
+	if result.NoSessions {
+		t.Fatal("NoSessions = true, want false（セッションがあるはず）")
+	}
+	if result.SidechainExcluded != 1 {
+		t.Errorf("SidechainExcluded = %d, want 1", result.SidechainExcluded)
+	}
+	if result.JudgeEvaluated != 1 {
+		t.Errorf("JudgeEvaluated = %d, want 1（親セッションのみ評価されるはず）", result.JudgeEvaluated)
+	}
+	if result.JudgeFailed != 0 {
+		t.Errorf("JudgeFailed = %d, want 0", result.JudgeFailed)
+	}
+	if fj.sessionCalls != 1 {
+		t.Errorf("fakeDailyJudge.sessionCalls = %d, want 1（サブエージェントは評価されないはず）", fj.sessionCalls)
+	}
+	if fj.nonSessionCalls != 2 {
+		t.Errorf("fakeDailyJudge.nonSessionCalls = %d, want 2（日報・振り返りで1回ずつ）", fj.nonSessionCalls)
+	}
+
+	if result.DailyPath == "" || result.RetroPath == "" {
+		t.Fatal("DailyPath/RetroPath が空")
+	}
+	dailyBytes, err := os.ReadFile(result.DailyPath)
+	if err != nil {
+		t.Fatalf("日報ファイルの読み取りに失敗: %v", err)
+	}
+	if len(dailyBytes) == 0 {
+		t.Error("日報ファイルが空")
+	}
+	retroBytes, err := os.ReadFile(result.RetroPath)
+	if err != nil {
+		t.Fatalf("振り返りファイルの読み取りに失敗: %v", err)
+	}
+	if len(retroBytes) == 0 {
+		t.Error("振り返りファイルが空")
+	}
+
+	wantDailyPath := filepath.Join(outDir, "daily", date+".md")
+	wantRetroPath := filepath.Join(outDir, "retro", date+".md")
+	if filepath.Clean(result.DailyPath) != filepath.Clean(wantDailyPath) {
+		t.Errorf("DailyPath = %q, want %q", result.DailyPath, wantDailyPath)
+	}
+	if filepath.Clean(result.RetroPath) != filepath.Clean(wantRetroPath) {
+		t.Errorf("RetroPath = %q, want %q", result.RetroPath, wantRetroPath)
+	}
+
+	// SaveRollup で保存されていること（rollup 経由で再取得できる）。
+	if _, ok, err := db.Rollup(date); err != nil || !ok {
+		t.Errorf("db.Rollup(%s) = ok=%v err=%v, want ok=true", date, ok, err)
+	}
+}
+
+func TestDaily_EvalCacheIsReusedOnSecondRun(t *testing.T) {
+	db := newTempDB(t)
+	outDir := t.TempDir()
+	cfg := config.Default()
+	cfg.Output.Dir = outDir
+
+	date := "2026-08-21"
+	base := time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC)
+
+	saveTestSession(t, db, testSessionSpec{
+		SessionID: "sess-1", ProjectPath: "/proj-a", FirstPrompt: "fix bug",
+		StartedAt: base, EndedAt: base.Add(5 * time.Minute), CostUSD: 0.03, CostKnown: true,
+	})
+
+	dayStart, dayEnd, err := dayRange(date)
+	if err != nil {
+		t.Fatalf("dayRange() error = %v", err)
+	}
+	rows, err := db.SessionsInRange(dayStart, dayEnd)
+	if err != nil {
+		t.Fatalf("SessionsInRange() error = %v", err)
+	}
+
+	prices, err := pricing.Load(nil)
+	if err != nil {
+		t.Fatalf("pricing.Load() error = %v", err)
+	}
+
+	fj := &fakeDailyJudge{}
+	cmd := newDailyTestCmd(t)
+
+	if _, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, false, true); err != nil {
+		t.Fatalf("runDaily() 1回目 error = %v", err)
+	}
+	if fj.sessionCalls != 1 {
+		t.Fatalf("1回目: sessionCalls = %d, want 1", fj.sessionCalls)
+	}
+
+	// 2回目: 同じ日をもう一度実行しても、評価キャッシュが効いてセッション評価は再実行されない。
+	result2, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, false, true)
+	if err != nil {
+		t.Fatalf("runDaily() 2回目 error = %v", err)
+	}
+	if fj.sessionCalls != 1 {
+		t.Errorf("2回目後: sessionCalls = %d, want 1（キャッシュが効いて再評価されないはず）", fj.sessionCalls)
+	}
+	if result2.JudgeEvaluated != 0 {
+		t.Errorf("2回目: JudgeEvaluated = %d, want 0", result2.JudgeEvaluated)
+	}
+}
+
+// TestDaily_NoSessionsSkipsAI は、その日にセッションが 1 件も無い場合、コマンド全体
+// （cobra 経由のフル実行）が AI を一切呼ばずに正常終了することを検証する。
+// dailyRun はセッション 0 件のとき buildJudge すら呼ばないため、claude 実行ファイルが
+// 存在しない環境でもこのテストは成功するはずである（それ自体が「AI 未呼び出し」の証拠）。
+func TestDaily_NoSessionsSkipsAI(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+	reportsDir := filepath.Join(tmp, "reports")
+
+	cfg := config.Default()
+	cfg.Output.Dir = reportsDir
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("cfg.Save() error = %v", err)
+	}
+
+	root := NewRootCommand("test")
+	root.AddCommand(newDailyCommand())
+	var outBuf, errBuf bytes.Buffer
+	root.SetOut(&outBuf)
+	root.SetErr(&errBuf)
+	root.SetIn(strings.NewReader(""))
+	root.SetArgs([]string{"--config", configPath, "--db", dbPath, "daily", "--date", "2026-08-22"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("daily（セッション0件）error = %v\nstdout=%s\nstderr=%s", err, outBuf.String(), errBuf.String())
+	}
+
+	if !strings.Contains(outBuf.String(), "セッションがありません") {
+		t.Errorf("stdout に案内メッセージが無い: %s", outBuf.String())
+	}
+
+	if _, err := os.Stat(filepath.Join(reportsDir, "daily", "2026-08-22.md")); !os.IsNotExist(err) {
+		t.Errorf("空の日報ファイルが生成されてしまっている（err=%v）", err)
+	}
+	if _, err := os.Stat(filepath.Join(reportsDir, "retro", "2026-08-22.md")); !os.IsNotExist(err) {
+		t.Errorf("空の振り返りファイルが生成されてしまっている（err=%v）", err)
+	}
+}
+
+func TestDaily_NoJudgeSkipsEvaluation(t *testing.T) {
+	db := newTempDB(t)
+	outDir := t.TempDir()
+	cfg := config.Default()
+	cfg.Output.Dir = outDir
+
+	date := "2026-08-23"
+	base := time.Date(2026, 8, 23, 9, 0, 0, 0, time.UTC)
+
+	saveTestSession(t, db, testSessionSpec{
+		SessionID: "sess-1", ProjectPath: "/proj-a", FirstPrompt: "fix bug",
+		StartedAt: base, EndedAt: base.Add(5 * time.Minute), CostUSD: 0.03, CostKnown: true,
+	})
+
+	dayStart, dayEnd, err := dayRange(date)
+	if err != nil {
+		t.Fatalf("dayRange() error = %v", err)
+	}
+	rows, err := db.SessionsInRange(dayStart, dayEnd)
+	if err != nil {
+		t.Fatalf("SessionsInRange() error = %v", err)
+	}
+
+	prices, err := pricing.Load(nil)
+	if err != nil {
+		t.Fatalf("pricing.Load() error = %v", err)
+	}
+
+	fj := &fakeDailyJudge{}
+	cmd := newDailyTestCmd(t)
+
+	result, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, true, true)
+	if err != nil {
+		t.Fatalf("runDaily(noJudge=true) error = %v", err)
+	}
+	if !result.SkippedJudge {
+		t.Error("SkippedJudge = false, want true")
+	}
+	if fj.sessionCalls != 0 {
+		t.Errorf("sessionCalls = %d, want 0（--no-judge のはず）", fj.sessionCalls)
+	}
+	// --no-judge でも日報・振り返り自体は生成される（Synthesize は常に呼ばれる）。
+	if fj.nonSessionCalls != 2 {
+		t.Errorf("nonSessionCalls = %d, want 2", fj.nonSessionCalls)
+	}
+	if result.DailyPath == "" || result.RetroPath == "" {
+		t.Error("--no-judge でも日報・振り返りは生成されるはず")
+	}
+}

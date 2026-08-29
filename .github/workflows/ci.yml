@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      # insights の一部のテストは外部コマンド（git）を使い、無い場合は t.Skip する。
+      # GitHub のランナーには git があるため、evidence の実リポジトリテストも実行される。
+      # claude CLI は無いので、AI を実際に呼ぶテストはスキップされる（課金は発生しない）。
+      - name: go test
+        run: go test ./...
+
+  lint:
+    name: format & tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt で整形されていないファイルがあります:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      # go.mod / go.sum が最新の依存関係と一致しているかを確認する。
+      - name: go mod tidy
+        run: |
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "go mod tidy による差分があります。ローカルで go mod tidy を実行してコミットしてください。"
+            exit 1
+          fi
+
+  race:
+    name: race detector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # 評価は cfg.Judge.Concurrency 並列で走り、DB 書き込みだけを直列化している。
+      # その境界が壊れていないことを競合検出器で確認する。
+      - name: go test -race
+        run: go test -race ./...
