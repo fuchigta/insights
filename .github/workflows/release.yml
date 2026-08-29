@@ -37,7 +37,11 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          out="insights-${GITHUB_REF_NAME}-${GOOS}-${GOARCH}${{ matrix.ext }}"
+          # アセット名にバージョンを含めない。含めてしまうと
+          # /releases/latest/download/<name> の固定 URL が使えず、
+          # 利用者がインストール手順のバージョンを毎回書き換えることになる。
+          # バージョンはリリースページと `insights --version` で確認できる。
+          out="insights-${GOOS}-${GOARCH}${{ matrix.ext }}"
           go build -trimpath \
             -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
             -o "dist/${out}" ./cmd/insights

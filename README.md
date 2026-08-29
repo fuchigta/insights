@@ -10,13 +10,29 @@ Claude Code などのコーディングエージェントの利用を、**PR 数
 
 ## インストール
 
-Go 1.25 以降が必要です（`go.mod` の `go 1.25.6` に合わせています）。
+[リリース](https://github.com/fuchigta/insights/releases/latest)から、環境に合わせたバイナリを取得します。
+Go は不要です。
+
+**Linux / macOS**（`linux-amd64` の部分を `linux-arm64` / `darwin-amd64` / `darwin-arm64` に置き換えてください）
 
 ```bash
-# リポジトリ直下でビルドする場合
-go build -o insights ./cmd/insights
+curl -fsSLo insights https://github.com/fuchigta/insights/releases/latest/download/insights-linux-amd64
+chmod +x insights
+sudo mv insights /usr/local/bin/
+```
 
-# もしくは PATH の通ったディレクトリへ直接インストール
+**Windows**（PowerShell）
+
+```powershell
+Invoke-WebRequest -Uri https://github.com/fuchigta/insights/releases/latest/download/insights-windows-amd64.exe -OutFile insights.exe
+```
+
+各バイナリには `.sha256` を添付しています。検証する場合は同じ URL に `.sha256` を付けて取得し、
+`sha256sum -c`（Windows なら `Get-FileHash`）で照合してください。
+
+Go の開発環境がある場合は、ソースからでも入れられます。
+
+```bash
 go install github.com/fuchigta/insights/cmd/insights@latest
 ```
 
