@@ -246,7 +246,11 @@ type frontMatter struct {
 func parseFrontMatter(data []byte) (frontMatter, error) {
 	var fm frontMatter
 
-	raw := string(data)
+	// CRLF を LF に寄せてから解析する。Windows で git の改行変換が有効な状態で
+	// チェックアウトされた SKILL.md や、利用者がエディタで編集したファイルは
+	// CRLF になりうる。区切り行の判定が "---\n" 固定だと、そのとき frontmatter を
+	// 読めず「手で改変済み」と誤判定してしまう。
+	raw := strings.ReplaceAll(string(data), "\r\n", "\n")
 	if !strings.HasPrefix(raw, frontMatterDelim+"\n") {
 		return fm, fmt.Errorf("frontmatter が見つかりません（先頭が %q ではありません）", frontMatterDelim)
 	}

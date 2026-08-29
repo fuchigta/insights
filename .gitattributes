@@ -1,0 +1,8 @@
+# チェックアウト時の改行変換を無効化し、どの OS でも作業ツリーを LF に揃える。
+#
+# これを指定しないと Windows のチェックアウトで LF が CRLF に変換され、
+# 次の 2 つが壊れる:
+#   - internal/skill/assets/SKILL.md: 埋め込みと配置ファイルのバイト比較が
+#     一致せず、導入直後に「手で改変済み」と誤判定される
+#   - internal/render/testdata/*.golden.*: 生成物（LF）と比較して不一致になる
+* text=auto eol=lf

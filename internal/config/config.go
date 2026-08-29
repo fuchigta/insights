@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -299,7 +300,13 @@ func normalizeForCompare(p string) string {
 	if err != nil {
 		expanded = p
 	}
-	return filepath.Clean(expanded)
+	// 区切り文字を "/" に寄せてから正規化する。filepath.Clean は
+	// 実行中の OS の区切り文字しか解釈しないため、Linux/macOS では
+	// "C:\Users\..." の "\" が区切りとして扱われず、設定に書いた
+	// Windows 形式のパスと突き合わせられない。insights は Windows の
+	// ログを他 OS で解析することもあるので、OS に依存しない形で比較する。
+	slashed := strings.ReplaceAll(expanded, `\`, "/")
+	return path.Clean(slashed)
 }
 
 // ExpandPath は "~"・"~/..."・"$HOME" を os.UserHomeDir() で展開し、
