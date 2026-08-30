@@ -664,6 +664,22 @@ func TestMigrate_UpgradesExistingV1Database(t *testing.T) {
 	if len(runIDs) != 1 || runIDs[0] != "run-x" {
 		t.Errorf("EvalRunTotals() runIDs = %v, want [run-x]", runIDs)
 	}
+
+	// v3 で足した実行記録のテーブルも、v1 の DB を開いた時点で使えるようになっている。
+	if err := d.SaveEvalRun(EvalRunRecord{
+		SessionID: "sess-old", PromptVersion: "v1", Judge: "claude-cli",
+		JudgeModel: "claude-opus-5", OK: true, CostUSD: 0.04, RunSessionID: "run-x",
+	}); err != nil {
+		t.Fatalf("SaveEvalRun() error = %v", err)
+	}
+	now := time.Now().UTC()
+	stats, err := d.EvalRunStatsInRange(now.Add(-time.Hour), now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("EvalRunStatsInRange() error = %v", err)
+	}
+	if stats.Total != 1 || stats.Succeeded != 1 {
+		t.Errorf("移行後の stats = %+v, want Total=1 Succeeded=1", stats)
+	}
 }
 
 // TestEvalRunStats_CountsAndFiltersByPeriod は評価実行の集計を確かめる。
