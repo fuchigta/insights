@@ -211,6 +211,21 @@ type Series struct {
 	ByModel []ModelUsage `json:"by_model"`
 	// Actions は期間内に生まれた改善提案とその消化状況。
 	Actions []model.Action `json:"actions"`
+	// EvalHealth は期間内の評価実行そのものの健全性。集計元が DB の実行記録で
+	// 日次ロールアップからは作れないため、BuildSeries ではなく呼び出し側が入れる。
+	// nil なら表示しない（記録が無い期間や、古い DB で評価した期間）。
+	EvalHealth *EvalHealth `json:"eval_health,omitempty"`
+}
+
+// EvalHealth は期間内に行われた評価の成否とコスト。
+// このツールは「評価そのものが本末転倒になっていないか」を自己監視する前提なので、
+// 評価が失敗し続けていること自体が見えるようにする。
+type EvalHealth struct {
+	Total          int            `json:"total"`
+	Succeeded      int            `json:"succeeded"`
+	Failed         int            `json:"failed"`
+	CostUSD        float64        `json:"cost_usd"` // 失敗した試行のぶんも含む
+	FailuresByKind map[string]int `json:"failures_by_kind,omitempty"`
 }
 
 // Point は 1 日分の集計値。HTML のグラフはこの列だけを見る。

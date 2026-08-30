@@ -91,6 +91,17 @@ var actionStatusLabels = map[string]string{
 	"expired": "期限切れ",
 }
 
+// evalFailureKindLabels は store.EvalFailure*（評価失敗の分類）の表示ラベル。
+// render は store パッケージに依存しない方針のため、値は文字列キーとして直接持つ
+// （store.EvalFailureRateLimit 等の定数は参照しない）。
+var evalFailureKindLabels = map[string]string{
+	"rate_limit": "レート制限",
+	"timeout":    "タイムアウト",
+	"schema":     "スキーマ不適合",
+	"save":       "結果の保存失敗",
+	"other":      "その他",
+}
+
 // jpLabel は table から key の日本語表示を引く。無ければ key をそのまま返す
 // （未知の値が来ても落とさない・情報を欠落させないため）。空文字はそのまま空文字。
 func jpLabel(table map[string]string, key string) string {
@@ -112,6 +123,7 @@ func learningValueJP(v string) string    { return jpLabel(learningValueLabels, v
 func goalCategoryJP(v string) string     { return jpLabel(goalCategoryLabels, v) }
 func confidenceJP(v string) string       { return jpLabel(confidenceLabels, v) }
 func actionStatusJP(v string) string     { return jpLabel(actionStatusLabels, v) }
+func evalFailureKindJP(v string) string  { return jpLabel(evalFailureKindLabels, v) }
 
 // verdictJP は Retro.Verdict / ProjectReview.Verdict の表示ラベル。
 // 空文字は「未設定」ではなく「-」として扱う（表・見出しでの空欄を分かりやすくするため）。

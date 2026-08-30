@@ -444,6 +444,65 @@ func (d *DB) EvalRunTotals(sessionIDs []string, promptVersion string) (float64, 
 	return total, runIDs, nil
 }
 
+// SaveEvalRun は評価 1 回分の実行記録を追記する。成功・失敗のどちらも残す。
+// 記録に失敗しても評価そのものは成立しているため、呼び出し側はこのエラーで
+// 評価を失敗扱いにしないこと（監視用の記録であって、評価結果の保存ではない）。
+func (d *DB) SaveEvalRun(r EvalRunRecord) error {
+	ok := 0
+	if r.OK {
+		ok = 1
+	}
+	_, err := d.db.Exec(`
+		INSERT INTO eval_runs (
+			session_id, prompt_version, judge, judge_model, ok,
+			failure_kind, failure_reason, cost_usd, run_session_id, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, r.SessionID, r.PromptVersion, r.Judge, r.JudgeModel, ok,
+		r.FailureKind, r.FailureReason, r.CostUSD, r.RunSessionID,
+		time.Now().UTC().Format(timeLayout))
+	if err != nil {
+		return fmt.Errorf("eval_runs(%s) の保存に失敗: %w", r.SessionID, err)
+	}
+	return nil
+}
+
+// EvalRunStatsInRange は from〜to（created_at 基準）に行われた評価実行の集計を返す。
+// 期間レポートに「評価自体が健全に回っているか」を出すために使う。
+func (d *DB) EvalRunStatsInRange(from, to time.Time) (EvalRunStats, error) {
+	stats := EvalRunStats{FailuresByKind: map[string]int{}}
+	rows, err := d.db.Query(
+		`SELECT ok, failure_kind, cost_usd FROM eval_runs WHERE created_at >= ? AND created_at < ?`,
+		toUTCString(from), toUTCString(to))
+	if err != nil {
+		return stats, fmt.Errorf("eval_runs の取得に失敗: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ok int
+		var kind string
+		var cost float64
+		if err := rows.Scan(&ok, &kind, &cost); err != nil {
+			return stats, fmt.Errorf("eval_runs の読み取りに失敗: %w", err)
+		}
+		stats.Total++
+		stats.CostUSD += cost
+		if ok == 1 {
+			stats.Succeeded++
+			continue
+		}
+		stats.Failed++
+		if kind == "" {
+			kind = EvalFailureOther
+		}
+		stats.FailuresByKind[kind]++
+	}
+	if err := rows.Err(); err != nil {
+		return stats, fmt.Errorf("eval_runs の走査に失敗: %w", err)
+	}
+	return stats, nil
+}
+
 // UnevaluatedSessions は from〜to に開始した中で、指定した prompt_version の評価が
 // まだ無い、または content_hash が変わっていて再評価が必要なセッション ID を返す。
 func (d *DB) UnevaluatedSessions(from, to time.Time, promptVersion string) ([]string, error) {

@@ -21,6 +21,41 @@ type EvalRun struct {
 	SessionID string  // 評価を行った claude 実行自体の session_id。集計対象から除外する用
 }
 
+// 評価失敗の分類。DB に保存する値なので、種類を増やすことはあっても既存の値は変えないこと。
+// 種類を分けるのは、利用者が取るべき手当てが違うため（レート制限は待つ、スキーマ不適合は
+// プロンプトを直す、といった具合に）。
+const (
+	EvalFailureRateLimit = "rate_limit"
+	EvalFailureTimeout   = "timeout"
+	EvalFailureSchema    = "schema"
+	EvalFailureSave      = "save"
+	EvalFailureOther     = "other"
+)
+
+// EvalRunRecord は評価 1 回分の実行記録。成否によらず 1 行残す。
+// 成功した評価だけを見ていると「特定の形のセッションで失敗し続けている」ことに気づけない
+// ため、失敗も履歴として残す。
+type EvalRunRecord struct {
+	SessionID     string
+	PromptVersion string
+	Judge         string
+	JudgeModel    string
+	OK            bool
+	FailureKind   string  // EvalFailure* のいずれか。成功なら空
+	FailureReason string  // 失敗理由の全文。成功なら空
+	CostUSD       float64 // 失敗した試行にもコストは発生しうるので、成否によらず記録する
+	RunSessionID  string
+}
+
+// EvalRunStats は期間内の評価実行の集計。
+type EvalRunStats struct {
+	Total          int
+	Succeeded      int
+	Failed         int
+	CostUSD        float64 // 失敗した試行のぶんも含む、実際に使った額
+	FailuresByKind map[string]int
+}
+
 // SessionRow は一覧・集計向けの軽量なセッション情報。
 // SessionByID のようにメッセージ全件を復元するコストをかけずに一覧表示や集計に使う。
 type SessionRow struct {

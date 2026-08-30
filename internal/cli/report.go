@@ -15,6 +15,7 @@ import (
 	"github.com/fuchigta/insights/internal/model"
 	"github.com/fuchigta/insights/internal/render"
 	"github.com/fuchigta/insights/internal/rollup"
+	"github.com/fuchigta/insights/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -145,6 +146,14 @@ func runReport(cmd *cobra.Command, cfg *config.Config, from, to, outFlag string)
 
 	series := rollup.BuildSeries(from, to, dailies, actions)
 
+	// 評価の実行記録は日次ロールアップに載っていない（記録は DB 側にしかない）ので、
+	// ここで足す。評価が失敗し続けていても成果物からは分からない、という穴を塞ぐため。
+	if health, healthErr := evalHealthFor(db, from, to); healthErr != nil {
+		return fmt.Errorf("評価の実行記録の集計に失敗しました: %w", healthErr)
+	} else if health != nil {
+		series.EvalHealth = health
+	}
+
 	missingDays := calendarDays - len(rows)
 	if missingDays < 0 {
 		missingDays = 0
@@ -175,6 +184,35 @@ func runReport(cmd *cobra.Command, cfg *config.Config, from, to, outFlag string)
 	return PrintResult(cmd, func(w io.Writer) error {
 		return renderReportHuman(w, result)
 	}, result)
+}
+
+// evalHealthFor は from〜to（両端を含む日付）の評価実行を集計する。
+// 記録が 1 件も無ければ nil を返し、レポート側で節ごと出さないようにする
+// （v0.2.2 以前に評価した期間は記録が無く、0 件と表示すると誤解を招くため）。
+func evalHealthFor(db *store.DB, from, to string) (*rollup.EvalHealth, error) {
+	start, err := time.Parse(reportDateLayout, from)
+	if err != nil {
+		return nil, err
+	}
+	end, err := time.Parse(reportDateLayout, to)
+	if err != nil {
+		return nil, err
+	}
+	// to は「その日を含む」ので、翌日 0 時を上限にする。
+	stats, err := db.EvalRunStatsInRange(start, end.AddDate(0, 0, 1))
+	if err != nil {
+		return nil, err
+	}
+	if stats.Total == 0 {
+		return nil, nil
+	}
+	return &rollup.EvalHealth{
+		Total:          stats.Total,
+		Succeeded:      stats.Succeeded,
+		Failed:         stats.Failed,
+		CostUSD:        stats.CostUSD,
+		FailuresByKind: stats.FailuresByKind,
+	}, nil
 }
 
 // resolveReportOutPath は --out の解決結果を返す。空なら

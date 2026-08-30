@@ -109,6 +109,20 @@ ul.caveats li{ margin-bottom:4px; }
 {{template "table" .ActionsTable}}
 </div>
 
+{{if .EvalHealth}}
+<h2>評価の健全性</h2>
+<div class="stat-row">
+  <div class="stat-tile"><div class="label">評価実行回数</div><div class="value">{{.EvalHealth.TotalLabel}}</div></div>
+  <div class="stat-tile"><div class="label">成功</div><div class="value">{{.EvalHealth.SucceededLabel}}</div></div>
+  <div class="stat-tile"><div class="label">失敗</div><div class="value">{{.EvalHealth.FailedLabel}}</div></div>
+  <div class="stat-tile"><div class="label">評価コスト（失敗分を含む）</div><div class="value">{{.EvalHealth.CostLabel}}</div></div>
+</div>
+<h3>失敗の内訳</h3>
+<div class="card">
+{{template "table" .EvalHealth.FailuresTable}}
+</div>
+{{end}}
+
 {{if .Caveats}}
 <h2>但し書き</h2>
 <ul class="caveats">

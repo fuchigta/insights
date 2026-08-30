@@ -41,6 +41,14 @@ const maxTransientAttempts = 3
 // 課金確認を通した意味も失われる）。
 var ErrRateLimited = errors.New("claude の実行がレート制限らしきエラーで失敗しました")
 
+// ErrTimeout / ErrSchemaMismatch も同じ理由で番兵にしている。評価の失敗は種類ごとに
+// 意味（利用者が取るべき手当て）が違うため、呼び出し側が errors.Is で仕分けて記録できる
+// ようにする。文字列一致で仕分けると、メッセージを直した瞬間に静かに壊れる。
+var (
+	ErrTimeout        = errors.New("claude の実行がタイムアウトしました")
+	ErrSchemaMismatch = errors.New("有効な評価 JSON を得られませんでした")
+)
+
 // Options は Judge の構成。
 type Options struct {
 	// Model は空ならフラグを渡さず claude の既定モデルを使う。
@@ -203,7 +211,7 @@ func (j *Judge) EvaluateRun(ctx context.Context, req judge.Request) (json.RawMes
 		return extracted, run, nil
 	}
 
-	return nil, lastRun, fmt.Errorf("%d 回試行しましたが有効な評価 JSON を得られませんでした: %w", maxSchemaAttempts, lastErr)
+	return nil, lastRun, fmt.Errorf("%d 回試行しましたが%w: %w", maxSchemaAttempts, ErrSchemaMismatch, lastErr)
 }
 
 func buildRetryNote(prevErr error) string {
@@ -409,7 +417,7 @@ func (j *Judge) runOnce(ctx context.Context, workDir, systemPrompt, userPrompt, 
 	err := cmd.Run()
 	if err != nil {
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			return nil, true, fmt.Errorf("claude の実行がタイムアウトしました (%s): %w", j.opts.Timeout, err)
+			return nil, true, fmt.Errorf("%w (%s): %w", ErrTimeout, j.opts.Timeout, err)
 		}
 		if isRateLimitLike(stdout.String() + "\n" + stderr.String()) {
 			return nil, true, fmt.Errorf("%w: %w (stderr=%s)", ErrRateLimited, err, stderr.String())

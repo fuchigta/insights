@@ -598,6 +598,33 @@ func evaluateOneSession(
 	return raw, run, nil
 }
 
+// classifyEvalFailure は評価の失敗を、利用者が取るべき手当てごとに分類する。
+// 文字列一致ではなく番兵エラーで判定するのは、メッセージを直したときに静かに
+// 「その他」へ落ちるのを防ぐため。
+func classifyEvalFailure(err error) string {
+	switch {
+	case errors.Is(err, claudecli.ErrRateLimited):
+		return store.EvalFailureRateLimit
+	case errors.Is(err, claudecli.ErrTimeout):
+		return store.EvalFailureTimeout
+	case errors.Is(err, claudecli.ErrSchemaMismatch):
+		return store.EvalFailureSchema
+	default:
+		return store.EvalFailureOther
+	}
+}
+
+// recordEvalRun は評価 1 回分の実行記録を残す。記録は監視のためのもので、評価結果
+// そのものではない。ここで失敗しても評価は成立しているので、警告だけ出して続行する。
+func recordEvalRun(deps evalDeps, rec store.EvalRunRecord) {
+	if deps.DB == nil {
+		return
+	}
+	if err := deps.DB.SaveEvalRun(rec); err != nil {
+		slog.Warn("評価の実行記録を保存できませんでした", "session_id", rec.SessionID, "error", err)
+	}
+}
+
 // evaluateSessions は targets を並行に評価し、結果を直列に DB へ保存する。
 // 並行度は deps.Concurrency（cfg.Judge.Concurrency）を上限とするが、store は接続を
 // 直列化しているため（store.Open が SetMaxOpenConns(1) する）、DB 書き込み自体は
@@ -713,6 +740,12 @@ func evaluateSessions(
 					fmt.Fprintln(stderr, "insights judge: レート制限らしきエラーを検知したため、残りのセッションの評価を打ち切ります")
 				}
 			}
+			recordEvalRun(deps, store.EvalRunRecord{
+				SessionID: o.sessionID, PromptVersion: deps.PromptVersion,
+				Judge: deps.JudgeName, JudgeModel: deps.Model,
+				FailureKind: classifyEvalFailure(o.err), FailureReason: o.err.Error(),
+				CostUSD: o.run.CostUSD, RunSessionID: o.run.SessionID,
+			})
 			result.Failed = append(result.Failed, evalFailure{SessionID: o.sessionID, Reason: o.err.Error()})
 			continue
 		}
@@ -720,9 +753,22 @@ func evaluateSessions(
 		row := bySessionID[o.sessionID]
 		if err := deps.DB.SaveEval(o.sessionID, deps.JudgeName, deps.Model, deps.PromptVersion, row.ContentHash, o.raw,
 			store.EvalRun{CostUSD: o.run.CostUSD, SessionID: o.run.SessionID}); err != nil {
-			result.Failed = append(result.Failed, evalFailure{SessionID: o.sessionID, Reason: fmt.Sprintf("評価結果の保存に失敗しました: %v", err)})
+			reason := fmt.Sprintf("評価結果の保存に失敗しました: %v", err)
+			recordEvalRun(deps, store.EvalRunRecord{
+				SessionID: o.sessionID, PromptVersion: deps.PromptVersion,
+				Judge: deps.JudgeName, JudgeModel: deps.Model,
+				FailureKind: store.EvalFailureSave, FailureReason: reason,
+				CostUSD: o.run.CostUSD, RunSessionID: o.run.SessionID,
+			})
+			result.Failed = append(result.Failed, evalFailure{SessionID: o.sessionID, Reason: reason})
 			continue
 		}
+
+		recordEvalRun(deps, store.EvalRunRecord{
+			SessionID: o.sessionID, PromptVersion: deps.PromptVersion,
+			Judge: deps.JudgeName, JudgeModel: deps.Model, OK: true,
+			CostUSD: o.run.CostUSD, RunSessionID: o.run.SessionID,
+		})
 
 		result.Succeeded = append(result.Succeeded, o.sessionID)
 		if o.run.CostUSD != 0 {

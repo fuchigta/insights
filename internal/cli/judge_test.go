@@ -206,6 +206,111 @@ func TestEvaluateSessions_PartialFailureContinuesAndSaves(t *testing.T) {
 	}
 }
 
+// TestEvaluateSessions_RecordsEvalRuns は、成功も失敗も実行記録として残ることを確かめる。
+// 成功した評価だけを見ていると「特定の形のセッションで失敗し続けている」ことに気づけない、
+// というのがこの記録を入れた動機なので、失敗が残ることが要点。
+func TestEvaluateSessions_RecordsEvalRuns(t *testing.T) {
+	db := newTempDB(t)
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+
+	saveTestSession(t, db, testSessionSpec{
+		SessionID: "sess-ok", ProjectPath: "/proj-a", FirstPrompt: "please do the ok-task",
+		StartedAt: base, EndedAt: base.Add(5 * time.Minute), CostUSD: 0.01, CostKnown: true,
+	})
+	saveTestSession(t, db, testSessionSpec{
+		SessionID: "sess-fail", ProjectPath: "/proj-a", FirstPrompt: "please do the fail-task",
+		StartedAt: base.Add(10 * time.Minute), EndedAt: base.Add(15 * time.Minute), CostUSD: 0.01, CostKnown: true,
+	})
+
+	rows, err := db.SessionsInRange(base.Add(-time.Hour), base.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("SessionsInRange() error = %v", err)
+	}
+
+	result, err := evaluateSessions(context.Background(), evalDeps{
+		DB: db, Judge: &fakeSessionJudge{failMarker: "fail-task"}, Cfg: config.Default(),
+		Model: "claude-sonnet-5", JudgeName: "fake-judge", PromptVersion: "v1", Concurrency: 1,
+	}, rows, nil, map[string]*sessionCostAgg{}, io.Discard)
+	if err != nil {
+		t.Fatalf("evaluateSessions() error = %v", err)
+	}
+	if len(result.Succeeded) != 1 || len(result.Failed) != 1 {
+		t.Fatalf("前提: 成功 %d 件 / 失敗 %d 件, want 1 件ずつ", len(result.Succeeded), len(result.Failed))
+	}
+
+	stats, err := db.EvalRunStatsInRange(base.Add(-24*time.Hour), time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("EvalRunStatsInRange() error = %v", err)
+	}
+	if stats.Total != 2 || stats.Succeeded != 1 || stats.Failed != 1 {
+		t.Errorf("stats = %+v, want Total=2 Succeeded=1 Failed=1", stats)
+	}
+	// フェイクは番兵エラーを返さないので「その他」に分類される。
+	if got := stats.FailuresByKind[store.EvalFailureOther]; got != 1 {
+		t.Errorf("FailuresByKind[%s] = %d, want 1（内訳 = %v）", store.EvalFailureOther, got, stats.FailuresByKind)
+	}
+}
+
+// TestEvaluateSessions_RateLimitRunRecords は、レート制限で打ち切ったときの記録を確かめる。
+// 実際に評価を試した 1 件だけが記録され、打ち切って評価しなかったぶんは記録されない
+// （試していない評価を失敗として数えると、失敗率が実態より悪く見えるため）。
+func TestEvaluateSessions_RateLimitRunRecords(t *testing.T) {
+	db := newTempDB(t)
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+
+	const n = 4
+	for i := 0; i < n; i++ {
+		saveTestSession(t, db, testSessionSpec{
+			SessionID: fmt.Sprintf("sess-%d", i), ProjectPath: "/proj-a", FirstPrompt: "task",
+			StartedAt: base.Add(time.Duration(i) * time.Minute), CostUSD: 0.01, CostKnown: true,
+		})
+	}
+	rows, err := db.SessionsInRange(base.Add(-time.Hour), base.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("SessionsInRange() error = %v", err)
+	}
+
+	if _, err := evaluateSessions(context.Background(), evalDeps{
+		DB: db, Judge: &fakeRateLimitJudge{}, Cfg: config.Default(),
+		Model: "claude-sonnet-5", JudgeName: "fake-judge", PromptVersion: "v1", Concurrency: 1,
+	}, rows, nil, map[string]*sessionCostAgg{}, io.Discard); err != nil {
+		t.Fatalf("evaluateSessions() error = %v", err)
+	}
+
+	stats, err := db.EvalRunStatsInRange(base.Add(-24*time.Hour), time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("EvalRunStatsInRange() error = %v", err)
+	}
+	if stats.Total != 1 || stats.Failed != 1 {
+		t.Errorf("stats = %+v, want Total=1 Failed=1（打ち切ったぶんは記録しない）", stats)
+	}
+	if got := stats.FailuresByKind[store.EvalFailureRateLimit]; got != 1 {
+		t.Errorf("FailuresByKind[%s] = %d, want 1（内訳 = %v）", store.EvalFailureRateLimit, got, stats.FailuresByKind)
+	}
+}
+
+// TestClassifyEvalFailure は失敗の分類が番兵エラー経由で効くことを確かめる。
+// ラップされたエラーでも errors.Is で辿れることが要点（メッセージ一致に戻ると静かに壊れる）。
+func TestClassifyEvalFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"レート制限", fmt.Errorf("AI 評価の実行に失敗しました: %w", claudecli.ErrRateLimited), store.EvalFailureRateLimit},
+		{"タイムアウト", fmt.Errorf("AI 評価の実行に失敗しました: %w", claudecli.ErrTimeout), store.EvalFailureTimeout},
+		{"スキーマ不適合", fmt.Errorf("AI 評価の実行に失敗しました: %w", claudecli.ErrSchemaMismatch), store.EvalFailureSchema},
+		{"それ以外", errors.New("boom"), store.EvalFailureOther},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyEvalFailure(tt.err); got != tt.want {
+				t.Errorf("classifyEvalFailure() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // fakeRateLimitJudge は、どのセッションを評価してもレート制限らしきエラー
 // （claudecli.ErrRateLimited）でラップして返す judge.Judge のフェイク実装。
 // evaluateSessions がレート制限検知で残りの評価を打ち切ることを検証するために使う。

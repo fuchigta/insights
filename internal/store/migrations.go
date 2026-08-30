@@ -12,6 +12,7 @@ type migration struct {
 var migrations = []migration{
 	{version: 1, sql: schemaV1},
 	{version: 2, sql: schemaV2},
+	{version: 3, sql: schemaV3},
 }
 
 // schemaV1 は初期スキーマ。insights が正規化データを保存する全テーブルをここで作る。
@@ -140,4 +141,29 @@ CREATE INDEX IF NOT EXISTS idx_messages_session_id    ON messages(session_id);
 const schemaV2 = `
 ALTER TABLE session_evals ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0;
 ALTER TABLE session_evals ADD COLUMN run_session_id TEXT NOT NULL DEFAULT '';
+`
+
+// schemaV3 は評価の実行記録を残すテーブル。session_evals が「最新の評価結果」を
+// (session_id, prompt_version) で 1 行に上書きするのに対し、こちらは試行を追記していく。
+//
+// 失敗した評価は session_evals に何も残らないため、成功した結果だけを見ていても
+// 「特定の形のセッションで失敗し続けている」ことに気づけない。評価そのものが
+// 本末転倒になっていないかを自己監視するのがこのツールの前提なので、評価自体の
+// 健全性を後から見られるようにする。
+const schemaV3 = `
+CREATE TABLE IF NOT EXISTS eval_runs (
+	id              INTEGER PRIMARY KEY AUTOINCREMENT,
+	session_id      TEXT NOT NULL,
+	prompt_version  TEXT NOT NULL DEFAULT '',
+	judge           TEXT NOT NULL DEFAULT '',
+	judge_model     TEXT NOT NULL DEFAULT '',
+	ok              INTEGER NOT NULL DEFAULT 0,
+	failure_kind    TEXT NOT NULL DEFAULT '',
+	failure_reason  TEXT NOT NULL DEFAULT '',
+	cost_usd        REAL NOT NULL DEFAULT 0,
+	run_session_id  TEXT NOT NULL DEFAULT '',
+	created_at      TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_eval_runs_created_at ON eval_runs(created_at);
 `

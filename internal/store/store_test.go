@@ -665,3 +665,46 @@ func TestMigrate_UpgradesExistingV1Database(t *testing.T) {
 		t.Errorf("EvalRunTotals() runIDs = %v, want [run-x]", runIDs)
 	}
 }
+
+// TestEvalRunStats_CountsAndFiltersByPeriod は評価実行の集計を確かめる。
+// 期間で絞れないと、レポートに「いつの失敗か分からない数字」が載ってしまう。
+func TestEvalRunStats_CountsAndFiltersByPeriod(t *testing.T) {
+	d := openTestDB(t)
+
+	runs := []EvalRunRecord{
+		{SessionID: "s1", PromptVersion: "v1", Judge: "claude-cli", JudgeModel: "claude-opus-5", OK: true, CostUSD: 0.02, RunSessionID: "run-1"},
+		{SessionID: "s2", PromptVersion: "v1", Judge: "claude-cli", JudgeModel: "claude-opus-5", OK: true, CostUSD: 0.03, RunSessionID: "run-2"},
+		// 失敗した試行にもコストは発生しうるので、合計に含める。
+		{SessionID: "s3", PromptVersion: "v1", Judge: "claude-cli", JudgeModel: "claude-opus-5",
+			FailureKind: EvalFailureRateLimit, FailureReason: "レート制限", CostUSD: 0.01},
+	}
+	for _, r := range runs {
+		if err := d.SaveEvalRun(r); err != nil {
+			t.Fatalf("SaveEvalRun(%s) error = %v", r.SessionID, err)
+		}
+	}
+
+	now := time.Now().UTC()
+	stats, err := d.EvalRunStatsInRange(now.Add(-time.Hour), now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("EvalRunStatsInRange() error = %v", err)
+	}
+	if stats.Total != 3 || stats.Succeeded != 2 || stats.Failed != 1 {
+		t.Errorf("stats = %+v, want Total=3 Succeeded=2 Failed=1", stats)
+	}
+	if want := 0.06; stats.CostUSD < want-1e-9 || stats.CostUSD > want+1e-9 {
+		t.Errorf("CostUSD = %v, want %v（失敗した試行のぶんも含む）", stats.CostUSD, want)
+	}
+	if got := stats.FailuresByKind[EvalFailureRateLimit]; got != 1 {
+		t.Errorf("FailuresByKind[%s] = %d, want 1", EvalFailureRateLimit, got)
+	}
+
+	// 期間外は 1 件も数えない。
+	past, err := d.EvalRunStatsInRange(now.AddDate(0, 0, -10), now.AddDate(0, 0, -9))
+	if err != nil {
+		t.Fatalf("EvalRunStatsInRange(過去) error = %v", err)
+	}
+	if past.Total != 0 || past.CostUSD != 0 || len(past.FailuresByKind) != 0 {
+		t.Errorf("期間外の stats = %+v, want ゼロ値", past)
+	}
+}

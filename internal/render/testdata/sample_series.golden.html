@@ -575,6 +575,29 @@ ul.caveats li{ margin-bottom:4px; }
 </div>
 
 
+<h2>評価の健全性</h2>
+<div class="stat-row">
+  <div class="stat-tile"><div class="label">評価実行回数</div><div class="value">24 件</div></div>
+  <div class="stat-tile"><div class="label">成功</div><div class="value">19 件</div></div>
+  <div class="stat-tile"><div class="label">失敗</div><div class="value">5 件（失敗率 20.8%）</div></div>
+  <div class="stat-tile"><div class="label">評価コスト（失敗分を含む）</div><div class="value">$0.8700</div></div>
+</div>
+<h3>失敗の内訳</h3>
+<div class="card">
+<table>
+  <caption>評価失敗の内訳</caption>
+  <thead><tr><th>種類</th><th>件数</th></tr></thead>
+  <tbody>
+  <tr><td>その他</td><td>1 件</td></tr>
+  <tr><td>レート制限</td><td>2 件</td></tr>
+  <tr><td>スキーマ不適合</td><td>1 件</td></tr>
+  <tr><td>タイムアウト</td><td>1 件</td></tr>
+  </tbody>
+</table>
+</div>
+
+
+
 <h2>但し書き</h2>
 <ul class="caveats">
 <li>LLM による評価は傾向を見るための目安であり、絶対値ではありません。</li><li>次のモデルは単価が未登録のため、コストは過小評価です: totally-unknown-model-9000</li><li>期間内に 2 日分のデータ欠測があります（集計対象外の日は 0 として扱っていません）。</li><li>未評価のセッションが 1 件あり、成果・やり方の分布はそれらを含みません。</li>

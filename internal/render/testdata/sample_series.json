@@ -1,6 +1,18 @@
 {
   "from": "2026-08-20",
   "to": "2026-08-29",
+  "eval_health": {
+    "total": 24,
+    "succeeded": 19,
+    "failed": 5,
+    "cost_usd": 0.87,
+    "failures_by_kind": {
+      "rate_limit": 2,
+      "timeout": 1,
+      "schema": 1,
+      "other": 1
+    }
+  },
   "points": [
     {
       "date": "2026-08-20",

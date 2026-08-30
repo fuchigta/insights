@@ -102,6 +102,10 @@ type pageData struct {
 	ActionCumulativeChart chartBlock
 	ActionsTable          *dataTable
 
+	// EvalHealth は評価実行そのものの健全性。記録が無い期間は nil にして
+	// セクション自体を出さない（古い DB で作った期間との後方互換のため）。
+	EvalHealth *evalHealthBlock
+
 	Caveats []string
 }
 
@@ -167,6 +171,17 @@ type svgText struct {
 	Text   string
 	Anchor string
 	Class  string
+}
+
+// evalHealthBlock は評価実行の健全性セクションの表示用データ。
+// 「評価そのものが失敗し続けていないか」を一目で見せるのが目的なので、
+// 失敗 0 件のときも FailuresTable に「失敗なし」の行を必ず入れる。
+type evalHealthBlock struct {
+	TotalLabel     string
+	SucceededLabel string
+	FailedLabel    string // 件数と失敗率
+	CostLabel      string // 失敗した試行のぶんも含む実コスト
+	FailuresTable  *dataTable
 }
 
 type halfCompareBlock struct {
@@ -747,6 +762,10 @@ func buildPageData(s *rollup.Series, opt HTMLOptions) *pageData {
 		Caveats: buildCaveats(byModel, unevaluated, missingDays),
 	}
 
+	if s != nil {
+		d.EvalHealth = buildEvalHealthBlock(s.EvalHealth)
+	}
+
 	return d
 }
 
@@ -1261,6 +1280,47 @@ func buildActionsTable(actions []model.Action) *dataTable {
 			orDash(a.VerifiedOn),
 			truncateRunes(orDash(a.Verdict), 80),
 		})
+	}
+	return table
+}
+
+// buildEvalHealthBlock は評価実行の実測値を表示用データに組み立てる。
+// eh が nil（記録が無い期間）ならセクション自体を出さないため nil を返す。
+func buildEvalHealthBlock(eh *rollup.EvalHealth) *evalHealthBlock {
+	if eh == nil {
+		return nil
+	}
+	failureRate := 0.0
+	if eh.Total > 0 {
+		failureRate = float64(eh.Failed) / float64(eh.Total) * 100
+	}
+	return &evalHealthBlock{
+		TotalLabel:     fmt.Sprintf("%d 件", eh.Total),
+		SucceededLabel: fmt.Sprintf("%d 件", eh.Succeeded),
+		FailedLabel:    fmt.Sprintf("%d 件（失敗率 %.1f%%）", eh.Failed, failureRate),
+		CostLabel:      formatMoneyPlain(eh.CostUSD),
+		FailuresTable:  buildEvalFailuresTable(eh),
+	}
+}
+
+// buildEvalFailuresTable は失敗種別ごとの内訳表を作る。
+// 失敗が 0 件のときも「失敗なし」の行を出す（健全であること自体が見えるようにするため）。
+func buildEvalFailuresTable(eh *rollup.EvalHealth) *dataTable {
+	table := &dataTable{
+		Caption: "評価失敗の内訳",
+		Headers: []string{"種類", "件数"},
+	}
+	if eh.Failed == 0 {
+		table.Rows = [][]string{{"失敗なし", "0 件"}}
+		return table
+	}
+	keys := make([]string, 0, len(eh.FailuresByKind))
+	for k := range eh.FailuresByKind {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		table.Rows = append(table.Rows, []string{evalFailureKindJP(k), fmt.Sprintf("%d 件", eh.FailuresByKind[k])})
 	}
 	return table
 }
