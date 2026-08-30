@@ -86,6 +86,8 @@ cron やタスクスケジューラから実行する場合は、確認を省略
 - **`insights judge` / `daily` / `run` は課金が発生します。** これらは内部で `claude -p` を呼びますが、
   `claude -p` は Claude Code のサブスクリプション枠ではなく **API の従量枠**を消費します。詳細は
   [docs/cost.md](docs/cost.md) を参照してください。
+- **セッションの会話本文は、マスキングせずに評価へ渡されます。** ツールが読んだファイルの中身も
+  含まれうるため、送信先（Claude 本体）とその判断の理由を [docs/privacy.md](docs/privacy.md) に記載しています。
 
 ## ドキュメント
 
@@ -93,4 +95,5 @@ cron やタスクスケジューラから実行する場合は、確認を省略
 - [docs/scheduling.md](docs/scheduling.md) — 定期実行の設定（Windows タスクスケジューラ / cron）とログ消失の詳細
 - [docs/reports.md](docs/reports.md) — 日報・振り返りの構成、評価軸 5 つの詳しい説明、丸めの仕様
 - [docs/cost.md](docs/cost.md) — コストの見積もり方、キャッシュ課金の仕組み、Claude Code 表示との数字の食い違い
+- [docs/privacy.md](docs/privacy.md) — セッション本文が評価にどこまで渡るか、マスキングをしていない理由
 - [docs/development.md](docs/development.md) — 設計と拡張点、CI、既知の制限（開発者向け）
