@@ -184,16 +184,24 @@ func runDaily(
 	// (b) を確認の対象から外すと「--no-judge なら課金しない」と誤解されるため、
 	// 両方をまとめてここで 1 回だけ確認する。
 	pendingEvals := 0
+	// 見積もりは DB に残っている評価の実績から出す（internal/cli/estimate.go）。
+	estimator := newEvalCostEstimator(db, cfg.Judge.Model)
+	evalEstimate := 0.0
+	evalFromActual := 0
 	if !noJudge {
 		pre, _, _, _, _, prepErr := prepareEvalTargets(db, rows, usageRows, false, prompts.PromptVersion)
 		if prepErr != nil {
 			return nil, prepErr
 		}
 		pendingEvals = len(pre)
+		evalEstimate, evalFromActual = estimator.estimateTargets(pre)
 	}
 	aiCalls := pendingEvals + synthesizeCallCount
 	label := fmt.Sprintf("AI 呼び出し（セッション評価 %d 件 + 日報・振り返りの生成 %d 回）", pendingEvals, synthesizeCallCount)
-	if err := confirmCost(cmd, label, aiCalls, float64(aiCalls)*estimateCostPerSession(cfg.Judge.Model), yes); err != nil {
+	// 日報・振り返りの生成はセッション評価とは入力の性質が違い、実績も分けて残していないので
+	// 既定値で見積もる。セッション評価のぶんだけ実績を使う。
+	estimated := evalEstimate + float64(synthesizeCallCount)*estimateCostPerSession(cfg.Judge.Model)
+	if err := confirmCost(cmd, label, aiCalls, estimated, estimator.estimateBasis(evalFromActual, pendingEvals), yes); err != nil {
 		return nil, err
 	}
 

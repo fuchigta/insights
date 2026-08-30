@@ -47,6 +47,14 @@ type EvalRunRecord struct {
 	RunSessionID  string
 }
 
+// EvalCostSample は「1 セッションの評価にいくらかかったか」の実績 1 件。
+// 見積もりを固定値ではなく実績から出すために使う。MessageCount は評価対象セッションの
+// 規模で、台本の長さ（＝入力トークン）とよく相関するため区分に使う。
+type EvalCostSample struct {
+	CostUSD      float64
+	MessageCount int
+}
+
 // EvalRunStats は期間内の評価実行の集計。
 type EvalRunStats struct {
 	Total          int

@@ -503,6 +503,41 @@ func (d *DB) EvalRunStatsInRange(from, to time.Time) (EvalRunStats, error) {
 	return stats, nil
 }
 
+// RecentEvalCostSamples は成功した評価の実コストを新しい順に最大 limit 件返す。
+// コストを取得できないバックエンド（cost_usd = 0）は見積もりの材料にならないので除く。
+//
+// 新しい順に限るのは、モデルの単価改定やプロンプトの変更で実コストが変わるため。
+// 古い実績まで平等に混ぜると、見積もりが現状から離れていく。
+func (d *DB) RecentEvalCostSamples(judgeModel string, limit int) ([]EvalCostSample, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := d.db.Query(`
+		SELECT r.cost_usd, COALESCE(s.message_count, 0)
+		FROM eval_runs r
+		LEFT JOIN sessions s ON s.session_id = r.session_id
+		WHERE r.ok = 1 AND r.cost_usd > 0 AND r.judge_model = ?
+		ORDER BY r.id DESC
+		LIMIT ?`, judgeModel, limit)
+	if err != nil {
+		return nil, fmt.Errorf("評価コスト実績の取得に失敗: %w", err)
+	}
+	defer rows.Close()
+
+	var out []EvalCostSample
+	for rows.Next() {
+		var sample EvalCostSample
+		if err := rows.Scan(&sample.CostUSD, &sample.MessageCount); err != nil {
+			return nil, fmt.Errorf("評価コスト実績の読み取りに失敗: %w", err)
+		}
+		out = append(out, sample)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("評価コスト実績の走査に失敗: %w", err)
+	}
+	return out, nil
+}
+
 // UnevaluatedSessions は from〜to に開始した中で、指定した prompt_version の評価が
 // まだ無い、または content_hash が変わっていて再評価が必要なセッション ID を返す。
 func (d *DB) UnevaluatedSessions(from, to time.Time, promptVersion string) ([]string, error) {

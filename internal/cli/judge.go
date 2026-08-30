@@ -250,10 +250,13 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 		return result, nil
 	}
 
-	estimated := float64(len(targets)) * estimateCostPerSession(cfg.Judge.Model)
+	// 見積もりは固定値ではなく、DB に残っている評価の実績から出す（internal/cli/estimate.go）。
+	estimator := newEvalCostEstimator(db, cfg.Judge.Model)
+	estimated, fromActual := estimator.estimateTargets(targets)
 	result.EstimatedCostUSD = estimated
 
-	if err := confirmCost(cmd, "評価対象セッション", len(targets), estimated, opts.Yes); err != nil {
+	basis := estimator.estimateBasis(fromActual, len(targets))
+	if err := confirmCost(cmd, "評価対象セッション", len(targets), estimated, basis, opts.Yes); err != nil {
 		result.DurationSeconds = time.Since(start).Seconds()
 		return result, err
 	}
@@ -347,7 +350,7 @@ func dayRange(date string) (start, end time.Time, err error) {
 //   - 標準入力が端末（対話環境）なら、確認プロンプトを出して y/yes 以外はキャンセル扱いにする
 //   - 標準入力が端末でない（cron 等の非対話環境）のに --yes も無ければ、黙って課金しないよう
 //     エラーにする
-func confirmCost(cmd *cobra.Command, label string, count int, estimatedUSD float64, yes bool) error {
+func confirmCost(cmd *cobra.Command, label string, count int, estimatedUSD float64, basis string, yes bool) error {
 	if yes {
 		return nil
 	}
@@ -358,8 +361,11 @@ func confirmCost(cmd *cobra.Command, label string, count int, estimatedUSD float
 		perSession = estimatedUSD / float64(count)
 	}
 	fmt.Fprintf(stderr, "%s: %d 件\n", label, count)
-	fmt.Fprintf(stderr, "推定コスト: 約 $%.4f（1 回あたり約 $%.4f の概算。実測値に基づく概算であり、正確な金額ではありません）\n",
+	fmt.Fprintf(stderr, "推定コスト: 約 $%.4f（1 回あたり平均 約 $%.4f の概算であり、正確な金額ではありません）\n",
 		estimatedUSD, perSession)
+	if basis != "" {
+		fmt.Fprintln(stderr, basis)
+	}
 
 	if !isInteractiveStdin(cmd) {
 		return fmt.Errorf("非対話環境（標準入力が端末ではありません）で実行されています。課金が発生するため --yes を指定してください")

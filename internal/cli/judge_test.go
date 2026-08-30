@@ -457,7 +457,7 @@ func TestConfirmCost_YesSkipsPrompt(t *testing.T) {
 	var errBuf bytes.Buffer
 	cmd.SetErr(&errBuf)
 
-	if err := confirmCost(cmd, "テスト", 3, 0.3, true); err != nil {
+	if err := confirmCost(cmd, "テスト", 3, 0.3, "", true); err != nil {
 		t.Errorf("confirmCost(yes=true) error = %v, want nil", err)
 	}
 }
@@ -470,7 +470,7 @@ func TestConfirmCost_NonInteractiveWithoutYesErrors(t *testing.T) {
 	var errBuf bytes.Buffer
 	cmd.SetErr(&errBuf)
 
-	err := confirmCost(cmd, "テスト", 3, 0.3, false)
+	err := confirmCost(cmd, "テスト", 3, 0.3, "", false)
 	if err == nil {
 		t.Fatal("confirmCost(非対話, yes=false) error = nil, want error（--yes を要求するはず）")
 	}
