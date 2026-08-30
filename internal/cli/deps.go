@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/fuchigta/insights/internal/config"
+	"github.com/fuchigta/insights/internal/judge"
 	"github.com/fuchigta/insights/internal/judge/claudecli"
 	"github.com/fuchigta/insights/internal/pricing"
 	"github.com/fuchigta/insights/internal/store"
@@ -35,9 +36,17 @@ func buildPriceTable(cfg *config.Config) (*pricing.Table, error) {
 	return t, nil
 }
 
+// newJudge は設定から評価バックエンドを組み立てる関数。実体は buildJudge で、
+// 統合テストがフェイク実装に差し替えるための唯一の穴として変数にしている
+// （コマンドを通した検証で claude を実際に呼ばないため。差し替えないかぎり挙動は同じ）。
+var newJudge = buildJudge
+
 // buildJudge は設定から AI 評価バックエンドを組み立てる。
 // 現状 claude-cli のみ。将来 codex を足すときはここで分岐する。
-func buildJudge(cfg *config.Config) (*claudecli.Judge, error) {
+//
+// 戻り値をインターフェースにしているのは、上記の差し替えを可能にするため。
+// 評価コストの記録に使う EvaluateRun は型アサーションで拾う（evaluateWithRunInfo 参照）。
+func buildJudge(cfg *config.Config) (judge.Judge, error) {
 	switch cfg.Judge.Backend {
 	case "", "claude-cli":
 		j := claudecli.New(claudecli.Options{

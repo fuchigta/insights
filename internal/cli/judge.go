@@ -261,7 +261,7 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 		return result, err
 	}
 
-	j, err := buildJudge(cfg)
+	j, err := newJudge(cfg)
 	if err != nil {
 		return result, err
 	}

@@ -141,7 +141,7 @@ func dailyRun(cmd *cobra.Command, cfg *config.Config, opts dailyOptions) (*daily
 
 	// 日報・振り返りの生成（rollup.Synthesize）は --no-judge の有無に関わらず必ず AI を使うため、
 	// セッションが 1 件でもあればここで judge バックエンドを構築する。
-	j, err := buildJudge(cfg)
+	j, err := newJudge(cfg)
 	if err != nil {
 		return nil, err
 	}
