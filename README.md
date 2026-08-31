@@ -67,6 +67,7 @@ cron やタスクスケジューラから実行する場合は、確認を省略
 | `report` | 任意期間の日次ロールアップを 1 つの HTML にまとめる（課金なし） |
 | `run` | `ingest` → `judge` → `daily` を一括実行する。定期実行向け（課金発生） |
 | `actions list` \| `show ID` | 振り返りが生成した改善提案の状態を確認する |
+| `actions drop ID...` \| `reopen ID...` | 改善提案を見送り(dropped)にする／未着手に戻す |
 | `skill install` \| `status` \| `uninstall` | 他のコーディングエージェント向けにスキルを導入・確認・削除する |
 
 各コマンドの詳細フラグは `insights <command> --help`、または [docs/configuration.md](docs/configuration.md) を参照してください。

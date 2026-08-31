@@ -76,6 +76,10 @@ Claude Code のワークツリー（`<project>/.claude/worktree/<name>`）で行
 そうしないと 2 回目以降でその日の検証結果が前回実行の分だけ欠けてしまうためです。結果として、
 **同じ日を何度回しても最後の実行の検証結果だけが残ります。**
 
+的外れな提案や重複した提案は、`insights actions drop <ID>...` で見送り(dropped)にできます
+（`--reason` で理由も残せます）。見送りにしたものは以降の振り返りで検証対象になりません。
+間違えたときは `insights actions reopen <ID>...` で未着手に戻せます。
+
 ## 生成物
 
 - `~/.insights/reports/daily/YYYY-MM-DD.md` — **日報**。その日何を成し遂げたかの記録。分析や反省は

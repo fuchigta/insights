@@ -217,3 +217,126 @@ func TestActionsShow_Found(t *testing.T) {
 		t.Errorf("Detail が空です（詳細が表示されていません）")
 	}
 }
+
+// --- drop / reopen ---
+
+func TestActionsDrop_MarksDroppedAndKeepsReason(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+	openID, _, _ := seedActions(t, dbPath)
+
+	stdout, _, err := runActionsCLI(t, configPath, dbPath,
+		"drop", strconv.FormatInt(openID, 10), "--reason", "重複していたため", "--json")
+	if err != nil {
+		t.Fatalf("actions drop 実行に失敗しました: %v (stdout=%s)", err, stdout)
+	}
+
+	var payload actionsUpdateResult
+	if jsonErr := json.Unmarshal([]byte(stdout), &payload); jsonErr != nil {
+		t.Fatalf("JSON デコードに失敗: %v (stdout=%s)", jsonErr, stdout)
+	}
+	if payload.Changed != 1 {
+		t.Errorf("Changed = %d, want 1", payload.Changed)
+	}
+
+	got := findActionByID(t, dbPath, openID)
+	if got.Status != model.ActionDropped {
+		t.Errorf("Status = %v, want %v", got.Status, model.ActionDropped)
+	}
+	if !strings.Contains(got.Verdict, "重複していたため") {
+		t.Errorf("Verdict = %q, 理由が残っていません", got.Verdict)
+	}
+	// 検証日を入れると、同じ日の振り返りが検証対象として拾い直してしまう
+	// （store.ActionsForVerification）。手で畳んだものは空のままにする。
+	if got.VerifiedOn != "" {
+		t.Errorf("VerifiedOn = %q, want 空（手動の見送りは検証日を持たない）", got.VerifiedOn)
+	}
+}
+
+func TestActionsDrop_MultipleIDsAndAlreadyDropped(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+	openID, doneID, droppedID := seedActions(t, dbPath)
+
+	stdout, _, err := runActionsCLI(t, configPath, dbPath, "drop",
+		strconv.FormatInt(openID, 10),
+		strconv.FormatInt(doneID, 10),
+		strconv.FormatInt(droppedID, 10),
+		"--json")
+	if err != nil {
+		t.Fatalf("actions drop 実行に失敗しました: %v (stdout=%s)", err, stdout)
+	}
+
+	var payload actionsUpdateResult
+	if jsonErr := json.Unmarshal([]byte(stdout), &payload); jsonErr != nil {
+		t.Fatalf("JSON デコードに失敗: %v (stdout=%s)", jsonErr, stdout)
+	}
+	if payload.Changed != 2 {
+		t.Errorf("Changed = %d, want 2", payload.Changed)
+	}
+	if payload.Unchanged != 1 {
+		t.Errorf("Unchanged = %d, want 1（既に dropped のもの）", payload.Unchanged)
+	}
+}
+
+// 存在しない ID が 1 つでも混ざっていたら、何も変更せずにエラーにすること。
+// 途中まで適用された状態で失敗すると、どこまで通ったのかが分からなくなる。
+func TestActionsDrop_UnknownIDChangesNothing(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+	openID, _, _ := seedActions(t, dbPath)
+
+	_, _, err := runActionsCLI(t, configPath, dbPath, "drop",
+		strconv.FormatInt(openID, 10), "999999")
+	if err == nil {
+		t.Fatal("存在しない ID を含むときはエラーになるはず")
+	}
+
+	if got := findActionByID(t, dbPath, openID); got.Status != model.ActionOpen {
+		t.Errorf("Status = %v, want %v（エラー時は何も変更しない）", got.Status, model.ActionOpen)
+	}
+}
+
+func TestActionsReopen_RestoresOpenAndClearsVerdict(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+	_, doneID, _ := seedActions(t, dbPath)
+
+	if _, _, err := runActionsCLI(t, configPath, dbPath, "reopen", strconv.FormatInt(doneID, 10)); err != nil {
+		t.Fatalf("actions reopen 実行に失敗しました: %v", err)
+	}
+
+	got := findActionByID(t, dbPath, doneID)
+	if got.Status != model.ActionOpen {
+		t.Errorf("Status = %v, want %v", got.Status, model.ActionOpen)
+	}
+	if got.Verdict != "" || got.VerifiedOn != "" {
+		t.Errorf("検証結果が残っています: Verdict=%q VerifiedOn=%q", got.Verdict, got.VerifiedOn)
+	}
+}
+
+// findActionByID は DB を開き直して 1 件を取り出す（CLI 実行後の状態確認用）。
+func findActionByID(t *testing.T, dbPath string, id int64) model.Action {
+	t.Helper()
+	db, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer db.Close()
+
+	all, err := db.AllActions()
+	if err != nil {
+		t.Fatalf("AllActions: %v", err)
+	}
+	for _, a := range all {
+		if a.ID == id {
+			return a
+		}
+	}
+	t.Fatalf("ID %d の改善提案が見つかりません", id)
+	return model.Action{}
+}

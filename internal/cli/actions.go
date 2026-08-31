@@ -1,11 +1,13 @@
 // このファイルは `insights actions` を実装する。振り返り（daily/retro）が生成した
-// 改善提案の状態を確認するだけのコマンドで、AI 呼び出しは一切行わない。
+// 改善提案を確認し、状態を手で変えるためのコマンドで、AI 呼び出しは一切行わない。
 package cli
 
 import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/fuchigta/insights/internal/model"
 	"github.com/spf13/cobra"
@@ -82,8 +84,8 @@ func newActionsCommand() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "actions",
-		Short: "改善提案の状態を確認する（list|show。AI 呼び出しは行わない）",
-		Long: "振り返り（daily/retro）が生成した改善提案の状態を確認する。AI 呼び出しは一切行わない。\n" +
+		Short: "改善提案を確認・整理する（list|show|drop|reopen。AI 呼び出しは行わない）",
+		Long: "振り返り（daily/retro）が生成した改善提案を確認し、状態を手で変える。AI 呼び出しは一切行わない。\n" +
 			"サブコマンドを指定しない場合は `list` と同じ動作になる。",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runActionsList(cmd, all, statusFlag)
@@ -96,6 +98,8 @@ func newActionsCommand() *cobra.Command {
 
 	cmd.AddCommand(newActionsListCommand(&all, &statusFlag))
 	cmd.AddCommand(newActionsShowCommand())
+	cmd.AddCommand(newActionsDropCommand())
+	cmd.AddCommand(newActionsReopenCommand())
 
 	return cmd
 }
@@ -288,12 +292,17 @@ func isProposalStuck(summary []actionStatusCount) bool {
 func toActionViews(actions []model.Action) []actionView {
 	out := make([]actionView, 0, len(actions))
 	for _, a := range actions {
-		out = append(out, actionView{
-			ID: a.ID, CreatedOn: a.CreatedOn, Title: a.Title,
-			Status: string(a.Status), Verdict: a.Verdict, VerifiedOn: a.VerifiedOn,
-		})
+		out = append(out, toActionView(a))
 	}
 	return out
+}
+
+// toActionView は 1 件分を一覧表示用のビューに変換する。
+func toActionView(a model.Action) actionView {
+	return actionView{
+		ID: a.ID, CreatedOn: a.CreatedOn, Title: a.Title,
+		Status: string(a.Status), Verdict: a.Verdict, VerifiedOn: a.VerifiedOn,
+	}
 }
 
 // renderActionsListHuman は actionsListResult を人間向けに整形して w に書き出す。
@@ -361,4 +370,162 @@ func truncateRunes(s string, max int) string {
 		return s
 	}
 	return string(r[:max]) + "…"
+}
+
+// --- 状態の手動変更（drop / reopen） ---
+
+// actionsUpdateResult は drop / reopen の実行結果。
+type actionsUpdateResult struct {
+	Action    string       `json:"action"` // "drop" | "reopen"
+	Changed   int          `json:"changed"`
+	Unchanged int          `json:"unchanged"` // 既にその状態だったもの
+	Actions   []actionView `json:"actions"`
+}
+
+// newActionsDropCommand は `insights actions drop <ID>...` を組み立てる。
+//
+// 振り返りが出した提案には、的外れなもの・重複したものが混じる。AI に検証させ続けても
+// 決着しないので、要らないものは人が畳めないと未決着の一覧が膨らむ一方になる。
+func newActionsDropCommand() *cobra.Command {
+	var reason string
+
+	cmd := &cobra.Command{
+		Use:   "drop <ID>...",
+		Short: "改善提案を見送り(dropped)にする",
+		Long: "改善提案を見送り(dropped)にする。複数の ID をまとめて指定できる。\n" +
+			"見送りにしたものは、以降の振り返りで検証対象にならない。\n" +
+			"間違えたときは `insights actions reopen <ID>` で未着手に戻せる。",
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runActionsUpdate(cmd, args, model.ActionDropped, reason)
+		},
+	}
+	cmd.Flags().StringVar(&reason, "reason", "", "見送りの理由（記録として残る）")
+
+	return cmd
+}
+
+// newActionsReopenCommand は `insights actions reopen <ID>...` を組み立てる。
+// drop の取り消し用。取り消せないと、ID を打ち間違えた時点で CLI からは戻せなくなる。
+func newActionsReopenCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reopen <ID>...",
+		Short: "改善提案を未着手(open)に戻す",
+		Long: "改善提案を未着手(open)に戻す。複数の ID をまとめて指定できる。\n" +
+			"検証結果（verdict / 検証日）は消える。",
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runActionsUpdate(cmd, args, model.ActionOpen, "")
+		},
+	}
+}
+
+// runActionsUpdate は drop / reopen の共通本体。
+//
+// 1 件でも存在しない ID があれば、何も変更せずにエラーにする。まとめて指定できる以上、
+// 途中まで適用された状態で失敗すると、どこまで通ったのかが分からなくなるため。
+func runActionsUpdate(cmd *cobra.Command, idArgs []string, status model.ActionStatus, reason string) error {
+	if err := cmd.Context().Err(); err != nil {
+		return err
+	}
+
+	ids := make([]int64, 0, len(idArgs))
+	for _, arg := range idArgs {
+		id, err := strconv.ParseInt(arg, 10, 64)
+		if err != nil {
+			return fmt.Errorf("ID は整数で指定してください: %q", arg)
+		}
+		ids = append(ids, id)
+	}
+
+	cfg, err := ConfigFromContext(cmd)
+	if err != nil {
+		return err
+	}
+
+	db, err := openStore(cfg)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	allActions, err := db.AllActions()
+	if err != nil {
+		return fmt.Errorf("改善提案の取得に失敗しました: %w", err)
+	}
+	byID := make(map[int64]model.Action, len(allActions))
+	for _, a := range allActions {
+		byID[a.ID] = a
+	}
+
+	targets := make([]model.Action, 0, len(ids))
+	for _, id := range ids {
+		a, ok := byID[id]
+		if !ok {
+			return fmt.Errorf("ID %d の改善提案は見つかりません（`insights actions list --all` で一覧を確認してください）", id)
+		}
+		targets = append(targets, a)
+	}
+
+	verdict := ""
+	if status == model.ActionDropped {
+		verdict = manualDropVerdict(reason)
+	}
+
+	result := actionsUpdateResult{Action: actionUpdateLabel(status)}
+	for _, a := range targets {
+		if a.Status == status {
+			result.Unchanged++
+			result.Actions = append(result.Actions, toActionView(a))
+			continue
+		}
+		// 検証日（verified_on）は空にする。ここは「振り返りがその日に検証した」ことを表す
+		// 列で、同じ日の daily を回し直したときに検証対象へ戻す判定にも使われている
+		// （store.ActionsForVerification）。手で畳んだものに日付を入れると、その日の
+		// 振り返りが検証対象として拾い直してしまう。畳んだ事実は verdict に残す。
+		if err := db.UpdateActionStatus(a.ID, status, verdict, ""); err != nil {
+			return fmt.Errorf("改善提案の更新に失敗しました: %w", err)
+		}
+		a.Status = status
+		a.Verdict = verdict
+		a.VerifiedOn = ""
+		result.Changed++
+		result.Actions = append(result.Actions, toActionView(a))
+	}
+
+	return PrintResult(cmd, func(w io.Writer) error {
+		return renderActionsUpdateHuman(w, result)
+	}, result)
+}
+
+// manualDropVerdict は手動で見送りにしたことを示す verdict 文字列を作る。
+// 検証日を使わない代わりに、いつ畳んだのかをここに残す。
+func manualDropVerdict(reason string) string {
+	base := fmt.Sprintf("手動で見送り（%s）", time.Now().Local().Format(dayLayout))
+	if strings.TrimSpace(reason) == "" {
+		return base
+	}
+	return base + ": " + strings.TrimSpace(reason)
+}
+
+// actionUpdateLabel は結果表示・JSON 出力に使う操作名を返す。
+func actionUpdateLabel(status model.ActionStatus) string {
+	if status == model.ActionDropped {
+		return "drop"
+	}
+	return "reopen"
+}
+
+// renderActionsUpdateHuman は drop / reopen の結果を人間向けに整形する。
+func renderActionsUpdateHuman(w io.Writer, r actionsUpdateResult) error {
+	fmt.Fprintf(w, "=== insights actions %s ===\n\n", r.Action)
+	for _, a := range r.Actions {
+		fmt.Fprintf(w, "  #%d [%s] %s\n", a.ID, actionStatusJP(a.Status), a.Title)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "変更: %d 件\n", r.Changed)
+	if r.Unchanged > 0 {
+		fmt.Fprintf(w, "変更なし（既にその状態）: %d 件\n", r.Unchanged)
+	}
+	return nil
 }
