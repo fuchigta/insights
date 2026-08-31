@@ -1,7 +1,7 @@
 ---
 name: insights
 description: AIコーディングエージェント（Claude Codeなど）のセッションログを日次集計し、AI評価に基づく振り返りと改善提案を出すinsights CLIの使い方。「今週いくら使った」「どのモデルに金がかかっている」「先週の振り返りは」「改善提案は実行できているか」「昨日は何をしたか」「セッションのコストは」など、AI利用のコスト・時間・成果・改善提案の進捗を尋ねられたときに参照する。
-x-insights-version: "1"
+x-insights-version: "2"
 ---
 
 # insights
@@ -61,5 +61,14 @@ AI (LLM-as-judge) が各セッションを定性評価した上で、日報・�
 
 - LLM による定性評価（outcome / model_fit / ownership 等）は傾向を見るための道具であり、
   絶対値として過度に信頼しないこと
+- **対話実行と自動実行では評価軸の意味が違う。** `claude -p` などの非対話実行
+  （サイドカー YAML の `automated_sessions`、セッション単位では `execution_mode: automated`）は、
+  実行中にユーザーが介入も検収もできない。介入コスト（`intervention_cost`）が低いことも、
+  検収の痕跡が無いこと（`ownership`）も当たり前であって、任せ方の良し悪しを表さない。
+  自動実行を含む日の分布（facets）は両者が混ざっているので、内訳
+  （`interactive_sessions` / `automated_sessions`）を見ずに傾向を語らないこと
+- 非対話実行について改善を語るときは、**起動時のプロンプトか、そこから呼び出している
+  スキル・スラッシュコマンドの定義**に落とすこと。実行中の確認や検収を促す助言は、
+  自動実行では実行できないので意味がない
 - 単価が未登録のモデルがあると、そのモデル分のコストは過小評価される
   （`unpriced_events` / `unknown_models` を確認する）
