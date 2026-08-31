@@ -1,6 +1,8 @@
 package assets
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -57,5 +59,30 @@ func TestSkillMDCopyIsIndependent(t *testing.T) {
 	b := SkillMD()
 	if b[0] == 'X' {
 		t.Error("SkillMD() が呼び出し側の変更の影響を受けています（コピーを返していない）")
+	}
+}
+
+// skillMDFingerprint は SKILL.md 全体（frontmatter を含む）から求めた指紋。
+//
+// TestSkillMDFrontMatter は frontmatter の insights-version と Version の一致しか見ておらず、
+// 本文だけを書き換えても検出できない。internal/judge/prompts の
+// TestPromptVersionIsBumpedWhenContentChanges と同じ考え方で、SKILL.md の内容が変わったら
+// このテストが落ちるようにし、Version と frontmatter の metadata.insights-version を
+// 上げてから下の値を更新することを促す。
+const skillMDFingerprint = "2360503216da799573ad78256c3f54696eb9be26645fc7eddf95b428a97a3b07"
+
+func TestSkillMDVersionIsBumpedWhenContentChanges(t *testing.T) {
+	h := sha256.New()
+	h.Write(SkillMD())
+	got := hex.EncodeToString(h.Sum(nil))
+
+	if skillMDFingerprint == "" {
+		t.Fatalf("skillMDFingerprint が未設定です。次の値を設定してください: %s (Version=%s)", got, Version)
+	}
+	if got != skillMDFingerprint {
+		t.Errorf(`SKILL.md の内容が変更されています。
+  Version と frontmatter の metadata.insights-version を上げてから skillMDFingerprint を更新してください。
+  現在の Version: %s
+  新しい指紋:     %s`, Version, got)
 	}
 }

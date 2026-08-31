@@ -251,6 +251,75 @@ func TestEvaluate_SchemaGoesToArgvNotSystemPrompt(t *testing.T) {
 	}
 }
 
+// TestEvaluate_MaxBudgetUSDAlwaysInArgv は「claude -p を呼ぶコードには必ず
+// --max-budget-usd を渡す」という CLAUDE.md の規約を固定する回帰テスト。
+//
+// claude -p は対話セッションのサブスクリプション枠ではなく API 従量枠を消費するため、
+// --max-budget-usd は暴走した 1 回が枠を食い潰さないための安全装置そのものである。
+// runOnce は現状 --max-budget-usd を条件分岐無しに必ず append しているが、将来の
+// リファクタでこれが if 文の中に入ってしまっても、コメントだけでは誰も気付けない。
+// このテストが落ちたら、それは「暴走時に予算上限が付かずに claude -p が実行される
+// 経路ができてしまった」ことを意味する。
+//
+// Options.MaxBudgetUSD の未指定（0）・0・負値は defaultMaxBudgetUSD にフォールバック
+// し、正値はその値がそのまま渡る。実装（runOnce の budget := ...; if budget <= 0 { ... }）
+// を読んで確認したとおりの挙動をテーブルで固定する。
+func TestEvaluate_MaxBudgetUSDAlwaysInArgv(t *testing.T) {
+	tests := []struct {
+		name         string
+		maxBudgetUSD float64
+		wantArg      string // --max-budget-usd の直後に来るべき値
+	}{
+		{"未指定またはゼロ", 0, "1"},
+		{"負値", -3.5, "1"},
+		{"正の明示値", 2.5, "2.5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			argvFile := filepath.Join(dir, "argv.txt")
+
+			j := New(Options{
+				BinPath:      os.Args[0], // このテストバイナリ自身を偽の claude として使う（TestMain 参照）
+				Timeout:      10 * time.Second,
+				WorkDir:      t.TempDir(),
+				MaxBudgetUSD: tt.maxBudgetUSD,
+			})
+
+			t.Setenv("INSIGHTS_TEST_FAKE_CLAUDE", "capture")
+			t.Setenv("INSIGHTS_TEST_ARGV_FILE", argvFile)
+
+			if _, err := j.Evaluate(context.Background(), judge.Request{Prompt: "test prompt"}); err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+
+			raw, err := os.ReadFile(argvFile)
+			if err != nil {
+				t.Fatalf("argv を捕捉できていません: %v", err)
+			}
+			argv := strings.Split(string(raw), "\n")
+
+			idx := -1
+			for i, a := range argv {
+				if a == "--max-budget-usd" {
+					idx = i
+					break
+				}
+			}
+			if idx == -1 {
+				t.Fatalf("argv に --max-budget-usd が含まれていません（課金の暴走を止める安全装置が抜けています）: %v", argv)
+			}
+			if idx+1 >= len(argv) {
+				t.Fatalf("--max-budget-usd に値が続いていません: %v", argv)
+			}
+			if got := argv[idx+1]; got != tt.wantArg {
+				t.Errorf("--max-budget-usd の値 = %q, want %q", got, tt.wantArg)
+			}
+		})
+	}
+}
+
 // TestEvaluate_RealCLI は実際に claude を起動する結合テスト。
 // コストが発生するため、既定では必ずスキップする。実行するには
 // INSIGHTS_TEST_REAL_CLI=1 を明示的にセットし、かつ -short を付けないこと。
