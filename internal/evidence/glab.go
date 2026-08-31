@@ -29,34 +29,37 @@ type glabItem struct {
 // updated:A..B` に相当する日付範囲検索フラグが glab に確実に存在するかを
 // この環境では検証できなかったため、取得後にクライアント側で UpdatedAt が
 // [From, To] に収まるものだけへ絞り込む、より保守的な方式にしている。
-func (c *Collector) collectGlab(ctx context.Context, q Query, repoSlug string) []model.Evidence {
+//
+// host は origin のホスト名。セルフホスト GitLab では gitlab.com 以外になるため、
+// GITLAB_HOST 環境変数で接続先インスタンスを明示する。
+func (c *Collector) collectGlab(ctx context.Context, q Query, host, repoSlug string) []model.Evidence {
 	if c.glabPath == "" {
 		slog.Warn("evidence: glab コマンドが見つからないためスキップします", "session", q.SessionID)
 		return nil
 	}
 	var out []model.Evidence
-	out = append(out, c.glabList(ctx, q, repoSlug, "mr", "mr")...)
-	out = append(out, c.glabList(ctx, q, repoSlug, "issue", "issue")...)
+	out = append(out, c.glabList(ctx, q, host, repoSlug, "mr", "mr")...)
+	out = append(out, c.glabList(ctx, q, host, repoSlug, "issue", "issue")...)
 	return out
 }
 
 // glabList は `glab <subcommand> list --repo <repo> --all --output json` を実行し、
 // セッションの時間帯に更新された MR/Issue を model.Evidence へ変換する。
 // 取得件数が上限を超える場合は先頭から切り詰め、slog.Warn で明示する。
-func (c *Collector) glabList(ctx context.Context, q Query, repoSlug, subcommand, kind string) []model.Evidence {
+func (c *Collector) glabList(ctx context.Context, q Query, host, repoSlug, subcommand, kind string) []model.Evidence {
 	limit := c.maxItemsOrDefault()
 
 	args := []string{subcommand, "list", "--repo", repoSlug, "--all", "--output", "json"}
 
-	out, err := c.runGlab(ctx, args...)
+	out, err := c.runGlab(ctx, host, args...)
 	if err != nil {
-		slog.Warn("evidence: glab の取得に失敗しました", "session", q.SessionID, "kind", kind, "repo", repoSlug, "error", err)
+		slog.Warn("evidence: glab の取得に失敗しました", "session", q.SessionID, "kind", kind, "host", host, "repo", repoSlug, "error", err)
 		return nil
 	}
 
 	var items []glabItem
 	if err := json.Unmarshal([]byte(out), &items); err != nil {
-		slog.Warn("evidence: glab の出力を解釈できませんでした", "session", q.SessionID, "kind", kind, "repo", repoSlug, "error", err)
+		slog.Warn("evidence: glab の出力を解釈できませんでした", "session", q.SessionID, "kind", kind, "host", host, "repo", repoSlug, "error", err)
 		return nil
 	}
 

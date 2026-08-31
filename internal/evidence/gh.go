@@ -22,14 +22,17 @@ type ghItem struct {
 
 // collectGh は gh CLI を使って PR と Issue の本文を集める。
 // glab とはサブコマンド体系が全く異なるため、コマンドラインは共有しない。
-func (c *Collector) collectGh(ctx context.Context, q Query, repoSlug string) []model.Evidence {
+//
+// host は origin のホスト名。GitHub Enterprise Server では github.com 以外に
+// なるため、GH_HOST 環境変数で gh に見に行かせる先を明示する。
+func (c *Collector) collectGh(ctx context.Context, q Query, host, repoSlug string) []model.Evidence {
 	if c.ghPath == "" {
 		slog.Warn("evidence: gh コマンドが見つからないためスキップします", "session", q.SessionID)
 		return nil
 	}
 	var out []model.Evidence
-	out = append(out, c.ghList(ctx, q, repoSlug, "pr", "pr")...)
-	out = append(out, c.ghList(ctx, q, repoSlug, "issue", "issue")...)
+	out = append(out, c.ghList(ctx, q, host, repoSlug, "pr", "pr")...)
+	out = append(out, c.ghList(ctx, q, host, repoSlug, "issue", "issue")...)
 	return out
 }
 
@@ -39,7 +42,7 @@ func (c *Collector) collectGh(ctx context.Context, q Query, repoSlug string) []m
 // 上限件数（maxItemsOrDefault）+1 件を要求し、実際にそれを超えて返ってきたら
 // 「上限で打ち切った」ことが分かるので、超過分は切り捨てた上で slog.Warn に
 // 明示する（黙って切り捨てない）。
-func (c *Collector) ghList(ctx context.Context, q Query, repoSlug, subcommand, kind string) []model.Evidence {
+func (c *Collector) ghList(ctx context.Context, q Query, host, repoSlug, subcommand, kind string) []model.Evidence {
 	limit := c.maxItemsOrDefault()
 
 	search := fmt.Sprintf("updated:%s..%s", ghSearchDate(q.From), ghSearchDate(q.To))
@@ -52,9 +55,9 @@ func (c *Collector) ghList(ctx context.Context, q Query, repoSlug, subcommand, k
 		"--limit", strconv.Itoa(limit + 1),
 	}
 
-	out, err := c.runGh(ctx, args...)
+	out, err := c.runGh(ctx, host, args...)
 	if err != nil {
-		slog.Warn("evidence: gh の取得に失敗しました", "session", q.SessionID, "kind", kind, "repo", repoSlug, "error", err)
+		slog.Warn("evidence: gh の取得に失敗しました", "session", q.SessionID, "kind", kind, "host", host, "repo", repoSlug, "error", err)
 		return nil
 	}
 

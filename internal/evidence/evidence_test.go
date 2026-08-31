@@ -469,21 +469,47 @@ func TestParseRemoteURL(t *testing.T) {
 	}
 }
 
-func TestIsGitHubGitLabHost(t *testing.T) {
-	if !isGitHubHost("github.com") {
-		t.Error("github.com が GitHub と判定されませんでした")
+func TestDetectForge(t *testing.T) {
+	cases := []struct {
+		name        string
+		host        string
+		githubHosts []string
+		gitlabHosts []string
+		want        forgeKind
+	}{
+		{name: "github.com", host: "github.com", want: forgeGitHub},
+		{name: "大文字小文字を無視する", host: "GitHub.com", want: forgeGitHub},
+		{name: "gitlab.com", host: "gitlab.com", want: forgeGitLab},
+
+		// セルフホスト: ホスト名から推測できるもの。
+		{name: "セルフホスト GitLab（推測）", host: "gitlab.example.co.jp", want: forgeGitLab},
+		{name: "GitHub Enterprise（推測）", host: "github.corp.example.com", want: forgeGitHub},
+
+		// セルフホスト: ホスト名からは分からず、設定が要るもの。
+		{name: "推測できないホストは判定しない", host: "git.example.com", want: forgeUnknown},
+		{name: "設定に書けば GitLab と判定する", host: "git.example.com",
+			gitlabHosts: []string{"git.example.com"}, want: forgeGitLab},
+		{name: "設定に書けば GitHub と判定する", host: "scm.example.com",
+			githubHosts: []string{"scm.example.com"}, want: forgeGitHub},
+
+		// 設定は推測より優先される（gitlab という名前の GHE もあり得る）。
+		{name: "設定が推測より優先される", host: "gitlab.example.com",
+			githubHosts: []string{"gitlab.example.com"}, want: forgeGitHub},
+
+		// 設定値の書き方の揺れを吸収する。
+		{name: "設定に URL 形式で書かれていても一致する", host: "git.example.com",
+			gitlabHosts: []string{"https://git.example.com/"}, want: forgeGitLab},
+		{name: "設定にポート付きで書かれていても一致する", host: "git.example.com",
+			gitlabHosts: []string{"git.example.com:8443"}, want: forgeGitLab},
+
+		{name: "空ホスト", host: "", want: forgeUnknown},
 	}
-	if !isGitHubHost("GitHub.com") {
-		t.Error("大文字小文字を無視していません")
-	}
-	if isGitHubHost("gitlab.com") {
-		t.Error("gitlab.com が GitHub と誤判定されました")
-	}
-	if !isGitLabHost("gitlab.com") {
-		t.Error("gitlab.com が GitLab と判定されませんでした")
-	}
-	if isGitLabHost("github.com") {
-		t.Error("github.com が GitLab と誤判定されました")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := detectForge(tc.host, tc.githubHosts, tc.gitlabHosts); got != tc.want {
+				t.Errorf("detectForge(%q) = %v, want %v", tc.host, got, tc.want)
+			}
+		})
 	}
 }
 

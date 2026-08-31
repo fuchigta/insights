@@ -142,20 +142,24 @@ func (c *Collector) collectForge(ctx context.Context, q Query) []model.Evidence 
 		return nil
 	}
 
+	// SaaS だけでなく GitHub Enterprise Server / セルフホスト GitLab も対象にする。
+	// どちらか判定できたら、そのホストを CLI に渡して同じインスタンスを見に行かせる。
+	forge := detectForge(host, c.cfg.GithubHosts, c.cfg.GitlabHosts)
+
 	var out []model.Evidence
-	if c.ghEnabled {
-		if isGitHubHost(host) {
-			out = append(out, c.collectGh(ctx, q, slug)...)
-		} else {
-			slog.Warn("evidence: origin が GitHub ではないため gh をスキップします", "session", q.SessionID, "host", host)
+	switch forge {
+	case forgeGitHub:
+		if c.ghEnabled {
+			out = append(out, c.collectGh(ctx, q, host, slug)...)
 		}
-	}
-	if c.glabEnabled {
-		if isGitLabHost(host) {
-			out = append(out, c.collectGlab(ctx, q, slug)...)
-		} else {
-			slog.Warn("evidence: origin が GitLab ではないため glab をスキップします", "session", q.SessionID, "host", host)
+	case forgeGitLab:
+		if c.glabEnabled {
+			out = append(out, c.collectGlab(ctx, q, host, slug)...)
 		}
+	default:
+		slog.Warn("evidence: origin のホストから GitHub/GitLab を判定できないため PR/Issue/MR の収集をスキップします"+
+			"（セルフホストなら設定の evidence.github_hosts / evidence.gitlab_hosts に追加してください）",
+			"session", q.SessionID, "host", host)
 	}
 	return out
 }

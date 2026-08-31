@@ -55,6 +55,13 @@ type EvidenceConfig struct {
 	Gh           Tristate `yaml:"gh"`   // true/false/auto
 	Glab         Tristate `yaml:"glab"` // true/false/auto
 	MaxBodyChars int      `yaml:"max_body_chars"`
+
+	// GithubHosts / GitlabHosts は SaaS 以外のホスト（GitHub Enterprise Server・
+	// セルフホスト GitLab）を明示するための一覧。origin の host がここに載って
+	// いれば、ホスト名から推測できなくても対応する CLI を使う。
+	// 例: ["ghe.example.com"] / ["git.example.co.jp"]
+	GithubHosts []string `yaml:"github_hosts"`
+	GitlabHosts []string `yaml:"gitlab_hosts"`
 }
 
 // ReportConfig はレポートの見せ方に関する設定。
@@ -126,6 +133,8 @@ func Default() *Config {
 			Gh:           TristateAuto,
 			Glab:         TristateAuto,
 			MaxBodyChars: 4000,
+			GithubHosts:  []string{},
+			GitlabHosts:  []string{},
 		},
 		Output: OutputConfig{
 			Dir: "~/.insights/reports",

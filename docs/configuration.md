@@ -20,6 +20,8 @@ evidence:
   gh: auto
   glab: auto
   max_body_chars: 4000
+  github_hosts: []
+  gitlab_hosts: []
 output:
   dir: ~/.insights/reports
 report:
@@ -50,6 +52,8 @@ pricing:
 | `evidence.gh` | `gh`（GitHub CLI）による PR/Issue 収集。`true`/`false`/`auto`（見つかれば使う） | `auto` |
 | `evidence.glab` | `glab`（GitLab CLI）による MR/Issue 収集。同上 | `auto` |
 | `evidence.max_body_chars` | 成果物本文を評価入力に含める上限文字数 | `4000` |
+| `evidence.github_hosts` | GitHub Enterprise Server のホスト名一覧。ここに書いたホストは `gh` で収集する | `[]` |
+| `evidence.gitlab_hosts` | セルフホスト GitLab のホスト名一覧。ここに書いたホストは `glab` で収集する | `[]` |
 | `output.dir` | 日報・振り返り・HTML レポートの出力先ディレクトリ | `~/.insights/reports` |
 | `report.rollup.cost_share` | 振り返りのプロジェクト別セッション一覧で、個別に載せず「その他 N 件」に丸める基準のひとつ。その日の総コストに対する割合（0..1）。**この割合と `report.rollup.duration_minutes` の両方を下回るセッションだけが丸められます**（どちらか一方でも上回れば個別掲載） | `0.01`（1%） |
 | `report.rollup.duration_minutes` | 上記の丸め基準のもう一方。セッションの所要時間（分） | `10` |
@@ -59,6 +63,31 @@ pricing:
 | `goals.global` | レポート全体で重視する価値の説明文。評価プロンプトに渡り、判定の物差しになる | `""` |
 | `goals.projects` | プロジェクトパスごとの重視する価値。一致すれば `goals.global` より優先される | `{}` |
 | `pricing.overrides` | モデルごとの単価上書き（`input` / `output` / `cache_write_5m` / `cache_write_1h` / `cache_read`、単位は 1M トークンあたり USD） | `{}` |
+
+## セルフホストの GitHub / GitLab
+
+PR/Issue/MR の収集先は `origin` のリモート URL のホスト名から決めます。判定は次の順です。
+
+1. `evidence.github_hosts` / `evidence.gitlab_hosts` に書かれたホストとの一致
+2. `github.com` / `gitlab.com`（SaaS）
+3. ホスト名のラベルに `github` / `gitlab` を含むかの推測（`gitlab.example.co.jp` や
+   `github.corp.example.com` はこれで拾えます）
+
+`git.example.com` のようにホスト名からフォージが分からない場合は 3 でも判定できないので、
+設定に明示してください。書かないと「判定できないためスキップ」の警告ログだけが出て、
+MR/Issue が収集されません。
+
+```yaml
+evidence:
+  gitlab_hosts:
+    - git.example.co.jp
+  github_hosts:
+    - ghe.example.com
+```
+
+判定できたホストは `GITLAB_HOST` / `GH_HOST` 環境変数として `glab` / `gh` に渡します。
+そのため、各 CLI がそのホストに対して認証済みである必要があります
+（`glab auth login --hostname git.example.co.jp` / `gh auth login --hostname ghe.example.com`）。
 
 `goals` は評価軸のうち「目的達成度」や「モデル選択の妥当性」を判定する際の物差しとして使われます。
 例えば手離れの良さを重視するプロジェクトと、知見の資産化を重視するプロジェクトでは「良い成果」の意味が
