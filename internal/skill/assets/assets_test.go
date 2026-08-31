@@ -9,8 +9,10 @@ import (
 
 // frontMatter は SKILL.md 先頭の YAML frontmatter のうち、このテストで検証する部分だけ。
 type frontMatter struct {
-	Name    string `yaml:"name"`
-	Version string `yaml:"x-insights-version"`
+	Name     string `yaml:"name"`
+	Metadata struct {
+		Version string `yaml:"insights-version"`
+	} `yaml:"metadata"`
 }
 
 func parseFrontMatter(t *testing.T, data []byte) frontMatter {
@@ -40,8 +42,8 @@ func TestSkillMDFrontMatter(t *testing.T) {
 	if fm.Name != "insights" {
 		t.Errorf("name = %q, want %q", fm.Name, "insights")
 	}
-	if fm.Version != Version {
-		t.Errorf("x-insights-version = %q, want %q (assets.Version)", fm.Version, Version)
+	if fm.Metadata.Version != Version {
+		t.Errorf("metadata.insights-version = %q, want %q (assets.Version)", fm.Metadata.Version, Version)
 	}
 }
 

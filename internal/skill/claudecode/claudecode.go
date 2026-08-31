@@ -177,9 +177,9 @@ func (i *Installer) Status(scope skill.Scope) (skill.Status, error) {
 		st.State = skill.StateModified
 		return st, nil
 	}
-	st.InstalledVersion = fm.Version
+	st.InstalledVersion = fm.version()
 
-	if fm.Version != assets.Version {
+	if fm.version() != assets.Version {
 		st.State = skill.StateOutdated
 		return st, nil
 	}
@@ -237,9 +237,27 @@ func (i *Installer) workDir() (string, error) {
 const frontMatterDelim = "---"
 
 // frontMatter は SKILL.md 先頭の YAML frontmatter のうち、状態判定に必要な部分だけ。
+//
+// バージョンは Agent Skills spec の `metadata`（利用側のツールが自由に使ってよい
+// キーバリューのマップ）に入れている。トップレベルに独自キーを足すと、claude.ai への
+// アップロードやパッケージングが "Unexpected key(s) in SKILL.md frontmatter" で
+// 落ちるため。LegacyVersion は metadata へ移す前に配置された SKILL.md
+// （トップレベルの x-insights-version）を読むための後方互換で、これが無いと
+// 旧バージョンの導入済みスキルが outdated ではなく「改変済み」に見えてしまう。
 type frontMatter struct {
-	Name    string `yaml:"name"`
-	Version string `yaml:"x-insights-version"`
+	Name     string `yaml:"name"`
+	Metadata struct {
+		Version string `yaml:"insights-version"`
+	} `yaml:"metadata"`
+	LegacyVersion string `yaml:"x-insights-version"`
+}
+
+// version は frontmatter から読み取ったスキルのバージョン。
+func (fm frontMatter) version() string {
+	if fm.Metadata.Version != "" {
+		return fm.Metadata.Version
+	}
+	return fm.LegacyVersion
 }
 
 // parseFrontMatter は SKILL.md のバイト列先頭にある YAML frontmatter を取り出してパースする。

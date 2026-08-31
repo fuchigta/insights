@@ -1,7 +1,8 @@
 ---
 name: insights
 description: AIコーディングエージェント（Claude Codeなど）のセッションログを日次集計し、AI評価に基づく振り返りと改善提案を出すinsights CLIの使い方。「今週いくら使った」「どのモデルに金がかかっている」「先週の振り返りは」「改善提案は実行できているか」「昨日は何をしたか」「セッションのコストは」など、AI利用のコスト・時間・成果・改善提案の進捗を尋ねられたときに参照する。
-x-insights-version: "3"
+metadata:
+  insights-version: "4"
 ---
 
 # insights
@@ -23,17 +24,19 @@ AI (LLM-as-judge) が各セッションを定性評価した上で、日報・�
 例に出すフラグは代表的なものだけで、網羅ではない。**正確な指定は必ず `--help` で確認すること。**
 
 - **「今日/昨日は何をしたか」** → 日報を読む。無ければ生成する
-  （`insights run --date 2026-08-30`。課金するので事前に確認）
+  （`insights run --date <YYYY-MM-DD>`。課金するので事前に確認）
 - **「今週いくら使ったか」「どのモデルに金がかかっているか」** → サイドカー YAML（後述）を
-  日付ぶん読む。HTML で見せるなら `insights report --from 2026-08-25 --to 2026-08-31`
+  日付ぶん読む。HTML で見せるなら `insights report --from <YYYY-MM-DD> --to <YYYY-MM-DD>`。
+  `unpriced_events` が 0 でなければ単価未登録のモデルがあり、その分コストは過小評価なので、
+  金額を伝えるときに必ず添えること
 - **「先週の振り返りは」** → 振り返り（`reports/retro/`）を読む
 - **「改善提案は実行できているか」** → `insights actions list --all --json` で全状態を見て、
   気になるものを `insights actions show <ID> --json` で開く
-- **「評価だけ先に済ませたい」** → `insights judge --date 2026-08-30 --limit 20`
+- **「評価だけ先に済ませたい」** → `insights judge --date <YYYY-MM-DD> --limit 20`
   （件数を絞ってコストを抑える）
-- **「取り込みだけしたい」** → `insights ingest --since 2026-08-01 --json`（AI を呼ばない）
+- **「取り込みだけしたい」** → `insights ingest --since <YYYY-MM-DD> --json`（AI を呼ばない）
 - **「評価は済んでいるので日報だけ作り直したい」** →
-  `insights daily --date 2026-08-30 --no-judge --json`
+  `insights daily --date <YYYY-MM-DD> --no-judge --json`
   （`--no-judge` でもレポート生成の AI 呼び出しは走る）
 - **「この提案は的外れなので閉じたい」** → `insights actions drop <ID> --reason "理由"`
   （ユーザーが明示的に指示したときだけ）
@@ -79,19 +82,3 @@ AI (LLM-as-judge) が各セッションを定性評価した上で、日報・�
 評価軸ごとの分布といった完全な構造化データは、サイドカー YAML
 `~/.insights/reports/meta/YYYY-MM-DD.yaml` にある。複数日をまたぐ集計はこのサイドカーから
 復元できるので、本文の Markdown をパースする必要はない。
-
-## 数値を読むときの注意
-
-- LLM による定性評価（outcome / model_fit / ownership 等）は傾向を見るための道具であり、
-  絶対値として過度に信頼しないこと
-- **対話実行と自動実行では評価軸の意味が違う。** `claude -p` などの非対話実行
-  （サイドカー YAML の `automated_sessions`、セッション単位では `execution_mode: automated`）は、
-  実行中にユーザーが介入も検収もできない。介入コスト（`intervention_cost`）が低いことも、
-  検収の痕跡が無いこと（`ownership`）も当たり前であって、任せ方の良し悪しを表さない。
-  自動実行を含む日の分布（facets）は両者が混ざっているので、内訳
-  （`interactive_sessions` / `automated_sessions`）を見ずに傾向を語らないこと
-- 非対話実行について改善を語るときは、**起動時のプロンプトか、そこから呼び出している
-  スキル・スラッシュコマンドの定義**に落とすこと。実行中の確認や検収を促す助言は、
-  自動実行では実行できないので意味がない
-- 単価が未登録のモデルがあると、そのモデル分のコストは過小評価される
-  （`unpriced_events` / `unknown_models` を確認する）
