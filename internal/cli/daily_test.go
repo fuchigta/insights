@@ -112,7 +112,7 @@ func TestDaily_RateLimitAbortsBeforeSynthesize(t *testing.T) {
 	fj := &fakeRateLimitDailyJudge{}
 	cmd := newDailyTestCmd(t)
 
-	if _, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, false, true); err == nil {
+	if _, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, 0, date, false, true); err == nil {
 		t.Fatal("runDaily() error = nil, want error（レート制限で打ち切るはず）")
 	}
 
@@ -175,7 +175,7 @@ func TestDaily_WritesTwoMarkdownFilesAndExcludesSidechain(t *testing.T) {
 	fj := &fakeDailyJudge{}
 	cmd := newDailyTestCmd(t)
 
-	result, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, false, true)
+	result, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, 0, date, false, true)
 	if err != nil {
 		t.Fatalf("runDaily() error = %v", err)
 	}
@@ -263,7 +263,7 @@ func TestDaily_EvalCacheIsReusedOnSecondRun(t *testing.T) {
 	fj := &fakeDailyJudge{}
 	cmd := newDailyTestCmd(t)
 
-	if _, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, false, true); err != nil {
+	if _, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, 0, date, false, true); err != nil {
 		t.Fatalf("runDaily() 1回目 error = %v", err)
 	}
 	if fj.sessionCalls != 1 {
@@ -271,7 +271,7 @@ func TestDaily_EvalCacheIsReusedOnSecondRun(t *testing.T) {
 	}
 
 	// 2回目: 同じ日をもう一度実行しても、評価キャッシュが効いてセッション評価は再実行されない。
-	result2, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, false, true)
+	result2, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, 0, date, false, true)
 	if err != nil {
 		t.Fatalf("runDaily() 2回目 error = %v", err)
 	}
@@ -354,7 +354,7 @@ func TestDaily_NoJudgeSkipsEvaluation(t *testing.T) {
 	fj := &fakeDailyJudge{}
 	cmd := newDailyTestCmd(t)
 
-	result, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, true, true)
+	result, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, 0, date, true, true)
 	if err != nil {
 		t.Fatalf("runDaily(noJudge=true) error = %v", err)
 	}
@@ -424,7 +424,7 @@ func TestDaily_JudgeCostComesFromExistingEvalsWhenNotJudgedThisRun(t *testing.T)
 	// dailyResult（CLI の人間向け出力用の集計値）はこの実行内で評価した分の
 	// judgeCostUSD/judgeSessionIDs をそのまま使っており今回の修正対象ではないため、
 	// ここでは日報（rollup.Daily）の meta 側を検証する。
-	if _, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, date, true, true); err != nil {
+	if _, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, 0, date, true, true); err != nil {
 		t.Fatalf("runDaily(noJudge=true) error = %v", err)
 	}
 	if fj.sessionCalls != 0 {

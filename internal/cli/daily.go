@@ -68,7 +68,8 @@ func newDailyCommand() *cobra.Command {
 type dailyResult struct {
 	Date              string   `json:"date"`
 	NoSessions        bool     `json:"no_sessions"`
-	SkippedJudge      bool     `json:"skipped_judge"` // --no-judge 指定時 true
+	SkippedJudge      bool     `json:"skipped_judge"`   // --no-judge 指定時 true
+	ConfigExcluded    int      `json:"config_excluded"` // exclude.projects / exclude.entrypoints で除外した件数
 	SidechainExcluded int      `json:"sidechain_excluded"`
 	JudgeEvaluated    int      `json:"judge_evaluated"`
 	JudgeFailed       int      `json:"judge_failed"`
@@ -129,9 +130,12 @@ func dailyRun(cmd *cobra.Command, cfg *config.Config, opts dailyOptions) (*daily
 	if err != nil {
 		return nil, fmt.Errorf("セッションの取得に失敗しました: %w", err)
 	}
+	// 除外設定は取り込み後に足されることが多いため、DB から読んだ後にも掛ける
+	// （internal/cli/exclude.go）。日報のコスト集計もここで落とした分は含まない。
+	rows, configExcluded := filterExcludedSessions(cfg, rows)
 
 	if len(rows) == 0 {
-		return &dailyResult{Date: date, NoSessions: true}, nil
+		return &dailyResult{Date: date, NoSessions: true, ConfigExcluded: configExcluded}, nil
 	}
 
 	prices, err := buildPriceTable(cfg)
@@ -146,7 +150,7 @@ func dailyRun(cmd *cobra.Command, cfg *config.Config, opts dailyOptions) (*daily
 		return nil, err
 	}
 
-	return runDaily(ctx, cmd, cfg, db, prices, j, rows, date, opts.NoJudge, opts.Yes)
+	return runDaily(ctx, cmd, cfg, db, prices, j, rows, configExcluded, date, opts.NoJudge, opts.Yes)
 }
 
 // runDaily は daily の本体処理。judge.Judge をパラメータで受け取るため、
@@ -159,6 +163,7 @@ func runDaily(
 	prices *pricing.Table,
 	j judge.Judge,
 	rows []store.SessionRow,
+	configExcluded int,
 	date string,
 	noJudge bool,
 	yes bool,
@@ -166,7 +171,7 @@ func runDaily(
 	start := time.Now()
 	stderr := cmd.ErrOrStderr()
 
-	result := &dailyResult{Date: date}
+	result := &dailyResult{Date: date, ConfigExcluded: configExcluded}
 
 	dayStart, dayEnd, err := dayRange(date)
 	if err != nil {
@@ -444,6 +449,9 @@ func renderDailyHuman(w io.Writer, r *dailyResult) error {
 	fmt.Fprintln(w)
 
 	fmt.Fprintf(w, "対象セッション: %d 件\n", r.TotalSessions)
+	if r.ConfigExcluded > 0 {
+		fmt.Fprintf(w, "除外（設定 exclude）: %d 件\n", r.ConfigExcluded)
+	}
 	fmt.Fprintf(w, "合計コスト: $%.4f\n", r.TotalCostUSD)
 	fmt.Fprintf(w, "新規改善提案: %d 件\n", r.ProposalCount)
 	fmt.Fprintln(w)

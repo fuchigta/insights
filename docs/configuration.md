@@ -58,11 +58,21 @@ pricing:
 | `report.rollup.cost_share` | 振り返りのプロジェクト別セッション一覧で、個別に載せず「その他 N 件」に丸める基準のひとつ。その日の総コストに対する割合（0..1）。**この割合と `report.rollup.duration_minutes` の両方を下回るセッションだけが丸められます**（どちらか一方でも上回れば個別掲載） | `0.01`（1%） |
 | `report.rollup.duration_minutes` | 上記の丸め基準のもう一方。セッションの所要時間（分） | `10` |
 | `database` | SQLite DB のパス | `~/.insights/insights.db` |
-| `exclude.projects` | 評価対象から除外するプロジェクトパスの一覧 | `[]` |
-| `exclude.entrypoints` | 評価対象から除外する entrypoint（例: 特定の自動実行経路）の一覧 | `[]` |
+| `exclude.projects` | 除外するプロジェクトパスの一覧。取り込み・評価・レポートのすべてで対象外になる | `[]` |
+| `exclude.entrypoints` | 除外する entrypoint（例: 特定の自動実行経路）の一覧。同上 | `[]` |
 | `goals.global` | レポート全体で重視する価値の説明文。評価プロンプトに渡り、判定の物差しになる | `""` |
 | `goals.projects` | プロジェクトパスごとの重視する価値。一致すれば `goals.global` より優先される | `{}` |
 | `pricing.overrides` | モデルごとの単価上書き（`input` / `output` / `cache_write_5m` / `cache_write_1h` / `cache_read`、単位は 1M トークンあたり USD） | `{}` |
+
+## 除外はいつ効くか
+
+`exclude.projects` / `exclude.entrypoints` は、`insights ingest` の取り込み時に弾くだけでなく、
+`insights judge` と `insights daily` が DB からセッションを読んだ後にも適用されます。
+そのため**すでに取り込んだ後から除外を足しても効きます**（評価もされず、日報にもコストにも
+載りません）。
+
+除外しても DB の中身は消えません。設定から外せばまた対象に戻ります。取り込み済みのデータ自体を
+消したい場合は、DB（`~/.insights/insights.db`）を直接操作してください。
 
 ## セルフホストの GitHub / GitLab
 

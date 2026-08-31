@@ -477,19 +477,6 @@ func discoverRefs(sources map[string]source.Source, since time.Time) ([]source.R
 	return all, nil
 }
 
-// excludesEntrypoint は entrypoint が cfg.Exclude.Entrypoints に含まれるかを判定する。
-func excludesEntrypoint(cfg *config.Config, entrypoint string) bool {
-	if strings.TrimSpace(entrypoint) == "" {
-		return false
-	}
-	for _, e := range cfg.Exclude.Entrypoints {
-		if strings.EqualFold(strings.TrimSpace(e), entrypoint) {
-			return true
-		}
-	}
-	return false
-}
-
 // appendUnique は values に s が無ければ追加する（未知モデルの重複警告を防ぐ）。
 func appendUnique(values []string, s string) []string {
 	for _, v := range values {

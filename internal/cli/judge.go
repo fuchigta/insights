@@ -168,6 +168,7 @@ type judgeResult struct {
 	To                  string        `json:"to"`
 	Force               bool          `json:"force"`
 	TotalSessions       int           `json:"total_sessions"`
+	ConfigExcluded      int           `json:"config_excluded"` // exclude.projects / exclude.entrypoints で除外した件数
 	SidechainExcluded   int           `json:"sidechain_excluded"`
 	CacheSkipped        int           `json:"cache_skipped"`
 	Targeted            int           `json:"targeted"` // --limit 適用後、実際に評価しようとした件数
@@ -221,6 +222,10 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 	if err != nil {
 		return nil, fmt.Errorf("セッションの取得に失敗しました: %w", err)
 	}
+	// 除外設定は取り込み後に足されることが多いため、DB から読んだ後にも掛ける
+	// （internal/cli/exclude.go）。
+	rows, configExcluded := filterExcludedSessions(cfg, rows)
+	result.ConfigExcluded = configExcluded
 	result.TotalSessions = len(rows)
 
 	usageRows, err := db.UsageInRange(from, to)
@@ -817,6 +822,7 @@ func renderJudgeHuman(w io.Writer, r *judgeResult) error {
 	fmt.Fprintln(w)
 
 	fmt.Fprintf(w, "対象セッション（期間内合計）: %d 件\n", r.TotalSessions)
+	fmt.Fprintf(w, "除外（設定 exclude）: %d 件\n", r.ConfigExcluded)
 	fmt.Fprintf(w, "除外（サブエージェント）: %d 件\n", r.SidechainExcluded)
 	fmt.Fprintf(w, "除外（評価キャッシュ済み）: %d 件\n", r.CacheSkipped)
 	fmt.Fprintf(w, "評価対象: %d 件\n", r.Targeted)
