@@ -1,0 +1,6 @@
+#!/bin/sh
+# コードとドキュメントの対応（scripts/doc-sync.tsv）が片側だけになっていないか調べる。
+# 有効化: git config core.hooksPath .githooks
+set -eu
+# git はフックをリポジトリのルートで実行する。
+exec scripts/check-doc-sync.sh

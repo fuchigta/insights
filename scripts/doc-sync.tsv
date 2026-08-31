@@ -1,0 +1,42 @@
+# ドキュメントの対応表。
+#
+# 「このファイルを触ったら、このドキュメントも見直すはず」という組を書いておき、
+# 片方だけをコミットしようとしたら scripts/check-doc-sync.sh が拒否する。
+# ドキュメントを増やしたら、対応するコードの場所をここに 1 行足すこと。
+#
+# 書式（タブ区切り、3 列目は省略可）:
+#   <変更を検知するパスのパターン>  <一緒に更新するドキュメント>  [発火条件の正規表現]
+#
+# - パスのパターンはシェルの glob（`case` と同じ）。`*` は `/` にも一致する。
+# - 3 列目を書くと、そのファイルの差分行（追加・削除）がこの正規表現に一致したときだけ
+#   発火する。ファイルの一部だけがドキュメントと対応している場合に使う。
+# - `*_test.go` はどの行にも一致しない（テストは利用者に見える面を定義しないため）。
+# - 対応が不要なコミットでは SKIP_DOC_SYNC=1 を付けて回避できる。
+
+# CLI のコマンド・フラグを足したら README のコマンド表を直す。
+# 実装の中身ではなく、コマンド定義の行が動いたときだけ発火させる。
+internal/cli/*.go	README.md	^[+-].*(Use:|Short:|Flags\(\)\.|AddCommand\()
+
+# 評価プロンプト・スキーマを変えたら、評価軸の説明を直す。
+internal/judge/prompts/*	docs/reports.md
+
+# 日報・振り返りのプロンプトを変えたら、生成物の説明を直す。
+internal/rollup/prompts/*	docs/reports.md
+
+# 日報・振り返りの出力スキーマ（description）を変えたら、生成物の説明を直す。
+internal/rollup/synth.go	docs/reports.md	^[+-].*"description"
+
+# Markdown フロントマター／サイドカー YAML は再集計の契約なので、項目が動いたら書く。
+internal/render/format.go	docs/reports.md	^[+-].*yaml:"
+
+# 設定項目を足したら設定の説明を直す。
+internal/config/config.go	docs/configuration.md
+
+# 単価表・単価の扱いを変えたらコストの説明を直す。
+internal/pricing/*	docs/cost.md
+
+# 1 回あたりの予算上限はコストの説明に既定値まで書いてある。
+internal/judge/claudecli/*.go	docs/cost.md	^[+-].*defaultMaxBudgetUSD
+
+# CI の内容は開発ドキュメントに書いてある。
+.github/workflows/*.yml	docs/development.md
