@@ -1,7 +1,7 @@
 ---
 name: insights
 description: AIコーディングエージェント（Claude Codeなど）のセッションログを日次集計し、AI評価に基づく振り返りと改善提案を出すinsights CLIの使い方。「今週いくら使った」「どのモデルに金がかかっている」「先週の振り返りは」「改善提案は実行できているか」「昨日は何をしたか」「セッションのコストは」など、AI利用のコスト・時間・成果・改善提案の進捗を尋ねられたときに参照する。
-x-insights-version: "2"
+x-insights-version: "3"
 ---
 
 # insights
@@ -10,31 +10,50 @@ x-insights-version: "2"
 AI (LLM-as-judge) が各セッションを定性評価した上で、日報・振り返り・改善提案を生成する CLI。
 このスキルは、insights を使ってユーザーの質問に答えるための使い方をまとめたもの。
 
-## コマンド
+## コマンドの調べ方
 
-すべて `--json` を付けて機械可読な出力を受け取ること。人間向けの表・見出し・強調などを
+**コマンドの一覧と最新のフラグは `insights --help` と `insights <サブコマンド> --help` で
+確認すること。このファイルには列挙しない**（CLI と二重管理になり、必ずどちらかが古くなるため）。
+
+出力はすべて `--json` を付けて機械可読な形で受け取ること。人間向けの表・見出し・強調を
 パースしようとしないこと。
 
-| コマンド | 得られるもの |
-|---|---|
-| `insights config init` | `~/.insights/config.yaml` を生成する |
-| `insights config doctor --json` | 設定値と依存（DB, `claude` CLI 等）の疎通確認 |
-| `insights ingest [--since DATE\|--all] --json` | ログを SQLite に取り込む（評価はしない。課金なし） |
-| `insights judge [--date DATE] [--force]` | 未評価セッションを AI で評価する（**課金発生**） |
-| `insights daily [--date DATE] --json` | 指定日の日報＋振り返りを生成し、内容を JSON で返す |
-| `insights report --from DATE --to DATE [--out FILE]` | 任意期間の HTML レポートを生成する |
-| `insights run [--date DATE]` | ingest → judge → daily を一括実行する（**課金発生**） |
-| `insights actions list --json` / `insights actions show ID --json` | 改善アクションの一覧・詳細（状態を含む） |
-| `insights skill install\|status\|uninstall` | このスキル自体の導入・状態確認・削除 |
+## よくある問いと最初の一手
 
-## レポートが存在しない日を聞かれたら
+例に出すフラグは代表的なものだけで、網羅ではない。**正確な指定は必ず `--help` で確認すること。**
+
+- **「今日/昨日は何をしたか」** → 日報を読む。無ければ生成する
+  （`insights run --date 2026-08-30`。課金するので事前に確認）
+- **「今週いくら使ったか」「どのモデルに金がかかっているか」** → サイドカー YAML（後述）を
+  日付ぶん読む。HTML で見せるなら `insights report --from 2026-08-25 --to 2026-08-31`
+- **「先週の振り返りは」** → 振り返り（`reports/retro/`）を読む
+- **「改善提案は実行できているか」** → `insights actions list --all --json` で全状態を見て、
+  気になるものを `insights actions show <ID> --json` で開く
+- **「評価だけ先に済ませたい」** → `insights judge --date 2026-08-30 --limit 20`
+  （件数を絞ってコストを抑える）
+- **「取り込みだけしたい」** → `insights ingest --since 2026-08-01 --json`（AI を呼ばない）
+- **「評価は済んでいるので日報だけ作り直したい」** →
+  `insights daily --date 2026-08-30 --no-judge --json`
+  （`--no-judge` でもレポート生成の AI 呼び出しは走る）
+- **「この提案は的外れなので閉じたい」** → `insights actions drop <ID> --reason "理由"`
+  （ユーザーが明示的に指示したときだけ）
+
+## 課金に注意する
+
+`claude` を呼ぶコマンドは課金される。**`judge` / `daily` / `run` は実行前に必ずユーザーに
+確認すること。** `daily` は `--no-judge` を付けても日報・振り返りの生成で AI を呼ぶ。
+複数日にまたがる ingest（`--all` や広い `--since`）のあとに judge を回す場合も同じ。
+
+- `--yes` は課金確認の省略。ユーザーの了解なしに付けないこと
+- `insights ingest` と `insights actions` は AI を呼ばない（課金なし）
+- **`actions drop` / `reopen` は提案の状態を書き換える。ユーザーが明示的に指示したときだけ
+  実行すること**
+
+## レポートの置き場
 
 日次レポートの既定の置き場は `~/.insights/reports/daily/YYYY-MM-DD.md`（日報）と
-`~/.insights/reports/retro/YYYY-MM-DD.md`（振り返り）。該当日のファイルがなければ
-`insights run --date <date>` で生成できる。
-
-**`run` と `judge` は AI 評価を伴い課金が発生する。実行前に必ずユーザーに確認すること。**
-複数日にまたがる ingest（`--all` や広い `--since`）→ judge も同様に確認すること。
+`~/.insights/reports/retro/YYYY-MM-DD.md`（振り返り）。`output.dir` の設定で変わるので、
+見つからないときは `insights config doctor --json` で実際の出力先を確認すること。
 
 ## 生ログではなく評価済みのサマリを見る
 
@@ -53,9 +72,13 @@ AI (LLM-as-judge) が各セッションを定性評価した上で、日報・�
 - **振り返り**（`reports/retro/`）: 金と時間がどこに消えたか、やり方をどう改善するか
 
 「今日/昨日は何をしたか」には日報を、「コストは」「改善提案は進んでいるか」には振り返りを
-読むこと。両方の先頭に再集計可能な YAML フロントマター（日付・セッション数・所要時間・
-コスト・モデル別内訳・評価軸ごとの分布など）が付いており、複数日をまたぐ集計はここから
-復元できる。本文の Markdown をパースする必要はない。
+読むこと。
+
+両方の先頭には最小限の YAML フロントマター（日付・セッション数・所要時間・コスト・達成率・
+`prompt_version` と、サイドカーへの相対パス `meta`）しか無い。モデル別・プロジェクト別の集計や
+評価軸ごとの分布といった完全な構造化データは、サイドカー YAML
+`~/.insights/reports/meta/YYYY-MM-DD.yaml` にある。複数日をまたぐ集計はこのサイドカーから
+復元できるので、本文の Markdown をパースする必要はない。
 
 ## 数値を読むときの注意
 

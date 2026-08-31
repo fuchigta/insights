@@ -13,7 +13,7 @@ import _ "embed"
 // 上げ忘れると、導入済み環境が internal/skill.StateOutdated を検出できず、
 // 古い説明のまま気付かれずに使い回されてしまう
 // （internal/judge/prompts.PromptVersion と同種の規約）。
-const Version = "2"
+const Version = "3"
 
 //go:embed SKILL.md
 var skillMD []byte
