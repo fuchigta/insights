@@ -1,0 +1,32 @@
+# Dependabot の更新設定。ワークフローではないので Actions の実行枠は消費しない。
+#
+# commit-message.prefix を指定しているのは、既定のメッセージ（"Bump x from 1 to 2"）が
+# Conventional Commits ではなく、CI の commit message ジョブに落とされるため。
+# prefix を付けると "build(deps): ..." の形になり、cliff.toml の分類にも乗る。
+#
+# groups でまとめているのは、依存の数だけ PR が立つとレビューが追いつかず、
+# 結局まとめて放置されるため。週 1 回、1 本にまとめて受け取る。
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+    groups:
+      go-modules:
+        patterns: ["*"]
+
+  # Actions のピン留め（actions/checkout@v7 など）は自分では気付けないので追随させる。
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+    groups:
+      github-actions:
+        patterns: ["*"]

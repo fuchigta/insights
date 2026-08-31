@@ -19,7 +19,8 @@ if [ "$#" -gt 0 ]; then
   docs=$*
 else
   docs="README.md CLAUDE.md"
-  for f in docs/*.md; do
+  # .github 配下（SECURITY.md など）もコードの場所を名指しするので対象に含める。
+  for f in docs/*.md .github/*.md; do
     [ -f "$f" ] || continue
     docs="$docs $f"
   done

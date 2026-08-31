@@ -42,5 +42,10 @@ internal/judge/claudecli/*.go	docs/cost.md	^[+-].*defaultMaxBudgetUSD
 scripts/check-*.sh	docs/development.md
 .githooks/*	docs/development.md
 
-# CI の内容は開発ドキュメントに書いてある。
-.github/workflows/*.yml	docs/development.md
+# GitHub 側の設定（Dependabot）の意図も開発ドキュメントに書いてある。
+.github/dependabot.yml	docs/development.md
+
+# CI の内容は開発ドキュメントに書いてある。ただし Dependabot が出す `uses:` の
+# バージョン更新まで「ドキュメントも直せ」と要求すると、その PR が永久に通らなくなる。
+# ジョブ・ステップの名前や中身（name: / run: / if:）が動いたときだけ発火させる。
+.github/workflows/*.yml	docs/development.md	^[+-].*(name:|run:|if:)

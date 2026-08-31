@@ -32,8 +32,9 @@
   同じ引数で呼ぶので、手元で通ったものは CI でも通る
   - `scripts/check-doc-sync.sh`: コードとドキュメントの対応（対応表 `scripts/doc-sync.tsv`）。
     片方だけが入っているコミットがあると落ちる。逃げ道は `Doc-Sync: skip <理由>`
-  - `scripts/check-doc-paths.sh`: ドキュメントが名指ししているパスの実在。まだ無いものを例として
-    挙げている参照は `scripts/doc-paths-ignore.txt` に理由付きで除外する
+  - `scripts/check-doc-paths.sh`: ドキュメント（`README.md` / `CLAUDE.md` / `docs/*.md` /
+    `.github/*.md`）が名指ししているパスの実在。まだ無いものを例として挙げている参照は
+    `scripts/doc-paths-ignore.txt` に理由付きで除外する
   - `scripts/check-unwanted-files.sh`: セッションログ・データベース・巨大ファイルの混入。
     逃げ道は `Unwanted-Files: skip <理由>`
   - `scripts/check-commit-types.sh`: Conventional Commits の type 一覧が `cliff.toml` /
@@ -49,6 +50,29 @@
 親への畳み込み、丸めの結果が描画に反映されること、フロントマターからの再集計）を検証します。
 これまで見つかった不具合はほぼすべて継ぎ目にあったためです。評価バックエンドは
 `internal/cli/deps.go` の `newJudge` を差し替えてフェイクにするので、`claude` は呼ばれません。
+
+## GitHub 側で有効にしているもの
+
+公開リポジトリなので、有料の Advanced Security 相当がいくつか無料で使えます。ワークフローを
+書かずに設定だけで動くものを有効にしています。
+
+- **CodeQL（Default setup）**: `go` と `actions` を対象にしたコードスキャン。ワークフロー
+  ファイルは置いていません（GitHub 側の設定で動きます）。`actions` を含めているのは、
+  ワークフロー自体の脆弱性（式展開の扱いなど）が自分では気付きにくいためです
+- **Secret scanning / Push protection**: 秘密情報を含む push を弾きます（公開リポジトリの既定）
+- **Dependabot アラート・セキュリティ更新**: 依存の既知脆弱性の検知と修正 PR
+- **Dependabot バージョン更新**: `.github/dependabot.yml`。gomod と github-actions を週 1 回、
+  それぞれ 1 本にまとめて更新します。`commit-message.prefix` を指定しているのは、既定の
+  メッセージ（`Bump x from 1 to 2`）が Conventional Commits ではなく、`commit message`
+  ジョブに落とされるためです
+- **プライベート脆弱性報告**: 公開 Issue を経由せずに報告できます（`.github/SECURITY.md`）
+- **ルールセット（main の履歴を壊さない）**: force push とブランチ削除を禁止しています。
+  PR は必須にしていないので、main への直接 push はこれまでどおりできます。止まるのは
+  push 済みの履歴を書き換える操作だけです（管理者にも適用されます）
+
+Dependabot が出す Actions の更新 PR（`uses:` のバージョン変更）が `doc sync` に引っかかると
+その PR は永久に通らなくなるため、対応表のワークフロー行は `name:` / `run:` / `if:` が
+動いたときだけ発火するよう絞ってあります。
 
 ## 制限と既知の弱点
 
