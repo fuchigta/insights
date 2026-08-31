@@ -937,6 +937,31 @@ func (d *DB) ActionsByStatus(statuses ...model.ActionStatus) ([]model.Action, er
 	return scanActions(rows)
 }
 
+// ActionsForVerification は date の振り返りで「検証対象」として渡すべき改善アクションを返す。
+//
+// 対象は date より前に作られたものだけ。その日に出したばかりの提案をその日のうちに
+// 検証することはできない（実行された形跡があるはずがない）ので渡さない。渡してしまうと、
+// 同じ日に daily を回し直すたびに当日の提案が検証されて閉じられ、次の実行では
+// タイトル重複の判定から外れて同じ提案が作り直される——という積み上がりが起きる。
+//
+// status が open のものに加えて、date に検証済みになったもの（verified_on = date）も返す。
+// これは同じ日の実行で閉じられたものなので、回し直すときは再び検証対象に戻さないと、
+// その日の検証結果が前回の実行の分だけ欠けてしまう。結果として、同じ日を何度回しても
+// 最後の実行の検証結果だけが残る。
+func (d *DB) ActionsForVerification(date string) ([]model.Action, error) {
+	rows, err := d.db.Query(`
+		SELECT id, created_on, title, detail, category, status, verdict, verified_on
+		FROM actions
+		WHERE created_on < ? AND (status = ? OR verified_on = ?)
+		ORDER BY created_on, id
+	`, date, string(model.ActionOpen), date)
+	if err != nil {
+		return nil, fmt.Errorf("検証対象 actions の取得に失敗: %w", err)
+	}
+	defer rows.Close()
+	return scanActions(rows)
+}
+
 // AllActions は全ての改善アクションを返す。
 func (d *DB) AllActions() ([]model.Action, error) {
 	rows, err := d.db.Query(`

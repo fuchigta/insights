@@ -534,6 +534,57 @@ func TestRollup_SaveAndFetch(t *testing.T) {
 	}
 }
 
+// 検証対象に渡すのは「その日より前に作られた提案」だけ。当日の提案を当日に検証させると、
+// 回し直すたびに閉じては作り直される積み上がりが起きる。
+// 一方、同じ日の実行で閉じたものは回し直しのときに戻ってこないと、その日の検証結果が
+// 前回実行の分だけ欠ける。
+func TestActionsForVerification(t *testing.T) {
+	d := openTestDB(t)
+
+	mk := func(createdOn, title string) int64 {
+		t.Helper()
+		id, err := d.CreateAction(&model.Action{CreatedOn: createdOn, Title: title})
+		if err != nil {
+			t.Fatalf("CreateAction(%s) error = %v", title, err)
+		}
+		return id
+	}
+
+	past := mk("2026-08-28", "過去の未決着")
+	sameDay := mk("2026-08-29", "当日に出した提案")
+	closedToday := mk("2026-08-27", "当日の実行で閉じたもの")
+	closedBefore := mk("2026-08-26", "前日までに閉じたもの")
+
+	if err := d.UpdateActionStatus(closedToday, model.ActionDone, "実行された", "2026-08-29"); err != nil {
+		t.Fatalf("UpdateActionStatus() error = %v", err)
+	}
+	if err := d.UpdateActionStatus(closedBefore, model.ActionDone, "実行された", "2026-08-28"); err != nil {
+		t.Fatalf("UpdateActionStatus() error = %v", err)
+	}
+
+	got, err := d.ActionsForVerification("2026-08-29")
+	if err != nil {
+		t.Fatalf("ActionsForVerification() error = %v", err)
+	}
+
+	ids := map[int64]bool{}
+	for _, a := range got {
+		ids[a.ID] = true
+	}
+	if !ids[past] {
+		t.Error("過去の未決着提案が検証対象に入っていない")
+	}
+	if !ids[closedToday] {
+		t.Error("同じ日の実行で閉じた提案が検証対象に戻っていない（回し直すと検証結果が欠ける）")
+	}
+	if ids[sameDay] {
+		t.Error("当日に出した提案が検証対象に入っている（積み上がりの原因）")
+	}
+	if ids[closedBefore] {
+		t.Error("前日までに決着済みの提案が検証対象に戻っている")
+	}
+}
+
 func TestActions_CreateAndUpdateStatus(t *testing.T) {
 	d := openTestDB(t)
 

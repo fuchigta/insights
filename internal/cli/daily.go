@@ -299,7 +299,10 @@ func runDaily(
 	daily.Meta.JudgeCostUSD = evalCostUSD
 	daily.Meta.JudgeSessionIDs = evalRunSessionIDs
 
-	openActions, err := db.ActionsByStatus(model.ActionOpen)
+	// 検証対象は「その日より前に作られた提案」だけ。当日出したばかりの提案を当日に
+	// 検証させると、回し直すたびに閉じては作り直される積み上がりが起きる（store 側の
+	// ActionsForVerification のコメントを参照）。
+	openActions, err := db.ActionsForVerification(date)
 	if err != nil {
 		return nil, fmt.Errorf("未決着の提案取得に失敗しました: %w", err)
 	}
