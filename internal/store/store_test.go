@@ -713,6 +713,72 @@ func TestMigrate_WorktreeColumnOnOldDatabase(t *testing.T) {
 	}
 }
 
+// ワークツリーの畳み込みは取り込み時にしか効かないので、コードを直しても既存の行は
+// 古いパスのまま残る。しかも mtime/size が変わらないファイルは再解析されないため、
+// ingest --all でも直らない。DB を開いたときに移行されることを確かめる。
+func TestMigrate_BackfillsWorktreeOnExistingRows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "insights.db")
+
+	// worktree 列を持たない時代（v1）の DB に、ワークツリーの cwd をそのまま
+	// project_path として持つ行を入れておく。
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatalf("schema_migrations の作成に失敗: %v", err)
+	}
+	if _, err := raw.Exec(schemaV1); err != nil {
+		t.Fatalf("schemaV1 の適用に失敗: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)`, time.Now().UTC().Format(timeLayout)); err != nil {
+		t.Fatalf("schema_migrations への記録に失敗: %v", err)
+	}
+	insert := `INSERT INTO sessions (session_id, source, project_path, project_label, started_at) VALUES (?, ?, ?, ?, ?)`
+	started := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC).Format(timeLayout)
+	if _, err := raw.Exec(insert, "sess-wt", "claude-code",
+		`C:\Users\me\src\insights\.claude\worktree\feat-x`, "feat-x", started); err != nil {
+		t.Fatalf("ワークツリー行の投入に失敗: %v", err)
+	}
+	if _, err := raw.Exec(insert, "sess-plain", "claude-code",
+		"/home/me/src/insights", "insights", started); err != nil {
+		t.Fatalf("通常行の投入に失敗: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("sql.DB.Close() error = %v", err)
+	}
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer d.Close()
+
+	wt, err := d.SessionByID("sess-wt")
+	if err != nil {
+		t.Fatalf("SessionByID(sess-wt) error = %v", err)
+	}
+	if wt.Worktree != "feat-x" {
+		t.Errorf("Worktree = %q, want feat-x", wt.Worktree)
+	}
+	if wt.ProjectPath != `C:\Users\me\src\insights` {
+		t.Errorf("ProjectPath = %q, 元のプロジェクトへ寄っていない", wt.ProjectPath)
+	}
+	if wt.ProjectLabel != "insights" {
+		t.Errorf("ProjectLabel = %q, want insights", wt.ProjectLabel)
+	}
+
+	// ワークツリーでない行は触らない。
+	plain, err := d.SessionByID("sess-plain")
+	if err != nil {
+		t.Fatalf("SessionByID(sess-plain) error = %v", err)
+	}
+	if plain.ProjectPath != "/home/me/src/insights" || plain.Worktree != "" {
+		t.Errorf("通常のセッションが書き換えられている: path=%q worktree=%q", plain.ProjectPath, plain.Worktree)
+	}
+}
+
 // TestMigrate_UpgradesExistingV1Database は、v2 を知らないバージョンで作られた既存 DB を
 // 開いたときに、データを保ったまま session_evals の追加カラムが使えるようになることを確かめる。
 // 利用者の手元にあるのは必ず「前のバージョンで作られた DB」なので、新規作成のときだけ通っても

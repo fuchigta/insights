@@ -2,7 +2,10 @@
 // Claude Code / Codex など由来の異なるセッションを同じ形に落として扱うための共通語彙。
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Role はメッセージの発話者種別。
 type Role string
@@ -135,4 +138,59 @@ type Action struct {
 	Status     ActionStatus
 	Verdict    string // AI による検証所見
 	VerifiedOn string // YYYY-MM-DD。最後に検証した日
+}
+
+// worktreeMarkers は Claude Code がワークツリーを切る場所。ワークツリーは
+// <project>/.claude/worktree/<name> のようにプロジェクト配下に作られるため、
+// cwd をそのままプロジェクトパスにすると 1 つのリポジトリの作業が
+// ワークツリーの数だけ別プロジェクトに散ってしまう。
+var worktreeMarkers = []string{"/.claude/worktree/", "/.claude/worktrees/"}
+
+// SplitWorktreePath は cwd がワークツリー配下なら、元のプロジェクトのパスと
+// ワークツリー名に分ける。ワークツリーでなければ (path, "") を返す。
+//
+// ワークツリーは「元のプロジェクトでの作業」として扱いたい（帰属先はリポジトリで
+// あって作業用ディレクトリではない）。一方で、どのワークツリーでの作業だったかは
+// 評価の文脈として残す価値があるので捨てずに返す。
+func SplitWorktreePath(path string) (base, worktree string) {
+	if path == "" {
+		return "", ""
+	}
+	// cwd は記録した側のマシンの区切り文字で入っている。/ に寄せて探す
+	// （置換は 1 バイト対 1 バイトなので、見つけた位置は元の path でもそのまま使える）。
+	slashed := strings.ReplaceAll(path, `\`, "/")
+
+	for _, marker := range worktreeMarkers {
+		i := indexFold(slashed, marker)
+		if i <= 0 {
+			// 見つからない、または先頭一致（元のプロジェクトが空になる）は対象外。
+			continue
+		}
+		rest := strings.Trim(slashed[i+len(marker):], "/")
+		if rest == "" {
+			continue
+		}
+		// ワークツリーのさらに下の階層が cwd のこともある。名前は先頭要素だけ。
+		name := rest
+		if j := strings.Index(name, "/"); j >= 0 {
+			name = name[:j]
+		}
+		return strings.TrimRight(path[:i], `/\`), name
+	}
+	return path, ""
+}
+
+// indexFold は大文字小文字を無視して sub の位置を返す。見つからなければ -1。
+// strings.ToLower で畳んでから探すと、ケース変換で長さが変わる文字（İ など）が
+// パスに混ざったときに位置がずれるため、元の文字列上で走査する。
+func indexFold(s, sub string) int {
+	if sub == "" {
+		return 0
+	}
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if strings.EqualFold(s[i:i+len(sub)], sub) {
+			return i
+		}
+	}
+	return -1
 }

@@ -1,11 +1,24 @@
 package store
 
+import (
+	"database/sql"
+	"fmt"
+	"strings"
+
+	"github.com/fuchigta/insights/internal/model"
+)
+
 // migration はスキーマに対する 1 回限りの変更。version は 1 始まりの連番で、
 // 適用済みかどうかは schema_migrations テーブルで管理する。
 // 将来スキーマを変える際は、既存の要素を書き換えず migrations の末尾に追記すること。
+//
+// sql は宣言的なスキーマ変更に使う。既存行の値を作り直すような、SQL で書くと
+// 読めなくなる移行には fn を使う（両方を指定した場合は sql → fn の順に、
+// 同じトランザクションで実行する）。
 type migration struct {
 	version int
 	sql     string
+	fn      func(*sql.Tx) error
 }
 
 // migrations は適用順のスキーマ変更一覧。
@@ -14,6 +27,74 @@ var migrations = []migration{
 	{version: 2, sql: schemaV2},
 	{version: 3, sql: schemaV3},
 	{version: 4, sql: schemaV4},
+	{version: 5, fn: backfillWorktree},
+}
+
+// backfillWorktree は v4 より前に取り込まれたセッションの project_path を、
+// ワークツリーから元のプロジェクトへ寄せ直す。
+//
+// ワークツリーの畳み込みは取り込み時（parse）に行うため、コードを直しても
+// 既に DB にある行は古いパスのまま残る。しかも取り込みは mtime/size が変わらない
+// ファイルを読み飛ばすので、insights ingest --all を実行しても再解析されない。
+// 移行しないと、過去のワークツリーでの作業はいつまでも別プロジェクト扱いのままになる。
+func backfillWorktree(tx *sql.Tx) error {
+	rows, err := tx.Query(`SELECT session_id, project_path FROM sessions WHERE worktree = ''`)
+	if err != nil {
+		return fmt.Errorf("移行対象セッションの取得に失敗: %w", err)
+	}
+
+	type fix struct {
+		sessionID string
+		path      string
+		label     string
+		worktree  string
+	}
+	var fixes []fix
+
+	for rows.Next() {
+		var sessionID, path string
+		if err := rows.Scan(&sessionID, &path); err != nil {
+			rows.Close()
+			return fmt.Errorf("移行対象セッションの読み取りに失敗: %w", err)
+		}
+		base, worktree := model.SplitWorktreePath(path)
+		if worktree == "" {
+			continue
+		}
+		fixes = append(fixes, fix{
+			sessionID: sessionID,
+			path:      base,
+			label:     lastPathElement(base),
+			worktree:  worktree,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("移行対象セッションの走査に失敗: %w", err)
+	}
+	rows.Close()
+
+	for _, f := range fixes {
+		if _, err := tx.Exec(
+			`UPDATE sessions SET project_path = ?, project_label = ?, worktree = ? WHERE session_id = ?`,
+			f.path, f.label, f.worktree, f.sessionID,
+		); err != nil {
+			return fmt.Errorf("session(%s) のワークツリー移行に失敗: %w", f.sessionID, err)
+		}
+	}
+	return nil
+}
+
+// lastPathElement はパスの末尾要素を返す。project_label の作り直しに使う。
+// project_path は記録した側のマシンの区切り文字で入っているため、/ と \ の
+// 両方を区切りとして扱う。
+func lastPathElement(path string) string {
+	trimmed := strings.TrimRight(path, `/\`)
+	if trimmed == "" {
+		return ""
+	}
+	idx := strings.LastIndexAny(trimmed, `/\`)
+	return trimmed[idx+1:]
 }
 
 // schemaV1 は初期スキーマ。insights が正規化データを保存する全テーブルをここで作る。

@@ -107,9 +107,17 @@ func (d *DB) migrate() error {
 		if err != nil {
 			return fmt.Errorf("マイグレーション v%d の開始に失敗: %w", m.version, err)
 		}
-		if _, err := tx.Exec(m.sql); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("マイグレーション v%d の適用に失敗: %w", m.version, err)
+		if m.sql != "" {
+			if _, err := tx.Exec(m.sql); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("マイグレーション v%d の適用に失敗: %w", m.version, err)
+			}
+		}
+		if m.fn != nil {
+			if err := m.fn(tx); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("マイグレーション v%d の適用に失敗: %w", m.version, err)
+			}
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,

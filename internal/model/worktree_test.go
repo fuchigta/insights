@@ -1,4 +1,4 @@
-package claudecode
+package model
 
 import "testing"
 
@@ -61,9 +61,9 @@ func TestSplitWorktreePath(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			base, worktree := splitWorktreePath(tc.path)
+			base, worktree := SplitWorktreePath(tc.path)
 			if base != tc.wantBase || worktree != tc.wantWorktree {
-				t.Errorf("splitWorktreePath(%q) = (%q, %q), want (%q, %q)",
+				t.Errorf("SplitWorktreePath(%q) = (%q, %q), want (%q, %q)",
 					tc.path, base, worktree, tc.wantBase, tc.wantWorktree)
 			}
 		})

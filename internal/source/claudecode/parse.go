@@ -237,7 +237,7 @@ func (s *Source) Parse(ref source.Ref) (*model.Session, error) {
 	}
 	// ワークツリー（<project>/.claude/worktree/<name>）は元のプロジェクトの作業として
 	// 扱う。cwd のままだとワークツリーの数だけ別プロジェクトに散ってしまう。
-	if base, worktree := splitWorktreePath(sess.ProjectPath); worktree != "" {
+	if base, worktree := model.SplitWorktreePath(sess.ProjectPath); worktree != "" {
 		sess.ProjectPath = base
 		sess.Worktree = worktree
 	}
