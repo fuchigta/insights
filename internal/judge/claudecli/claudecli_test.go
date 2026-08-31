@@ -33,6 +33,25 @@ func TestMain(m *testing.M) {
 // 終了する。
 func runFakeClaudeProcess(mode string) {
 	switch mode {
+	case "capture":
+		// 受け取った argv と、--system-prompt-file の中身をファイルに書き出してから
+		// 正常な応答を返す。スキーマがコマンドラインだけで渡っていることを、
+		// 実際のプロセス起動を通して確かめるために使う。
+		if path := os.Getenv("INSIGHTS_TEST_ARGV_FILE"); path != "" {
+			_ = os.WriteFile(path, []byte(strings.Join(os.Args, "\n")), 0o644)
+		}
+		if path := os.Getenv("INSIGHTS_TEST_SYSTEM_FILE"); path != "" {
+			var sysPath string
+			for i, a := range os.Args {
+				if a == "--system-prompt-file" && i+1 < len(os.Args) {
+					sysPath = os.Args[i+1]
+				}
+			}
+			body, _ := os.ReadFile(sysPath)
+			_ = os.WriteFile(path, body, 0o644)
+		}
+		fmt.Println(`{"result":"","structured_output":{"ok":"yes"},"is_error":false,"session_id":"run-1","total_cost_usd":0.01}`)
+		os.Exit(0)
 	case "ratelimit":
 		// isRateLimitLike が拾う文字列を stderr に出し、非ゼロ終了する。
 		fmt.Fprintln(os.Stderr, "Error: rate limit exceeded (429 too many requests)")
@@ -134,14 +153,15 @@ func TestBuildSystemPrompt(t *testing.T) {
 	if !strings.Contains(got, "ROLE-INSTRUCTIONS") {
 		t.Errorf("system prompt に System が含まれていない: %q", got)
 	}
-	if !strings.Contains(got, `"type":"object"`) {
-		t.Errorf("system prompt に Schema が含まれていない: %q", got)
+	// スキーマは --json-schema でコマンドラインから渡す（runOnce）。system prompt にも
+	// 積むと同じ JSON を 1 回の評価で二重に送ることになるため、ここには含めない。
+	if strings.Contains(got, `"type":"object"`) {
+		t.Errorf("system prompt に Schema が二重に積まれている: %q", got)
 	}
 
-	// System が空でも panic しない。
-	got2 := buildSystemPrompt(judge.Request{Schema: json.RawMessage(`{}`)})
-	if !strings.Contains(got2, "{}") {
-		t.Errorf("System 空でも Schema は含まれるべき: %q", got2)
+	// System が空でも panic せず、空文字を返す。
+	if got2 := buildSystemPrompt(judge.Request{Schema: json.RawMessage(`{}`)}); got2 != "" {
+		t.Errorf("System 空のときの system prompt = %q, want 空", got2)
 	}
 }
 
@@ -178,6 +198,56 @@ func TestEvaluate_RateLimitedOutputWrapsErrRateLimited(t *testing.T) {
 	// 明らかに超過していればリトライ回数・バックオフの変更を疑う。
 	if elapsed > 15*time.Second {
 		t.Errorf("elapsed = %v, リトライ待ちが長すぎる（maxTransientAttempts/バックオフの変更を確認）", elapsed)
+	}
+}
+
+// スキーマは --json-schema でコマンドラインから渡し、system prompt には積まないこと。
+// 両方に積むと同じ JSON を 1 回の評価で二重に送ることになる。ここは buildSystemPrompt の
+// 単体テストと違い、実際にプロセスを起動して argv と system prompt ファイルの中身を突き合わせる。
+func TestEvaluate_SchemaGoesToArgvNotSystemPrompt(t *testing.T) {
+	dir := t.TempDir()
+	argvFile := filepath.Join(dir, "argv.txt")
+	systemFile := filepath.Join(dir, "system.txt")
+
+	j := New(Options{
+		BinPath: os.Args[0], // このテストバイナリ自身を偽の claude として使う（TestMain 参照）
+		Timeout: 10 * time.Second,
+		WorkDir: t.TempDir(),
+	})
+
+	t.Setenv("INSIGHTS_TEST_FAKE_CLAUDE", "capture")
+	t.Setenv("INSIGHTS_TEST_ARGV_FILE", argvFile)
+	t.Setenv("INSIGHTS_TEST_SYSTEM_FILE", systemFile)
+
+	schema := json.RawMessage(`{"type":"object","properties":{"ok":{"type":"string"}},"required":["ok"],"additionalProperties":false}`)
+	if _, err := j.Evaluate(context.Background(), judge.Request{
+		System: "ROLE-INSTRUCTIONS",
+		Prompt: "test prompt",
+		Schema: schema,
+	}); err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+
+	argv, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("argv を捕捉できていません: %v", err)
+	}
+	if !strings.Contains(string(argv), "--json-schema") {
+		t.Errorf("argv に --json-schema が無い:\n%s", argv)
+	}
+	if !strings.Contains(string(argv), `"required":["ok"]`) {
+		t.Errorf("argv にスキーマ本体が渡っていない:\n%s", argv)
+	}
+
+	sys, err := os.ReadFile(systemFile)
+	if err != nil {
+		t.Fatalf("system prompt を捕捉できていません: %v", err)
+	}
+	if !strings.Contains(string(sys), "ROLE-INSTRUCTIONS") {
+		t.Errorf("system prompt に役割指示が渡っていない: %q", sys)
+	}
+	if strings.Contains(string(sys), `"required"`) {
+		t.Errorf("system prompt にスキーマが二重に積まれている: %q", sys)
 	}
 }
 

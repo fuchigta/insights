@@ -222,23 +222,18 @@ func buildRetryNote(prevErr error) string {
 	return "\n\n---\n" + reason + "説明文やコードフェンスを含めず、指定された JSON Schema に従う JSON オブジェクトのみを出力してください。"
 }
 
-// buildSystemPrompt は req.System（役割指示）と req.Schema（返させたい形）を
-// 1 つの system prompt にまとめる。内容は毎回ほぼ同一（プロンプトのバージョンが
-// 変わらない限り不変）なため、claude 側の prompt cache が効きやすい。
+// buildSystemPrompt は req.System（役割指示）を system prompt として返す。
+// 内容は毎回ほぼ同一（プロンプトのバージョンが変わらない限り不変）なため、
+// claude 側の prompt cache が効きやすい。
 // 実際に claude -p へ渡す経路は runOnce を参照（--system-prompt-file 経由）。
+//
+// req.Schema はここには含めない。スキーマは runOnce が --json-schema で渡しており、
+// claude 側はそれをツール定義としてモデルに見せる（構造化出力はツール経由で実装されて
+// いるため、スキーマ無しの最小呼び出しに比べてツール定義ぶんの固定費が乗ることが
+// 実測で確認できている）。system prompt にも同じ JSON を積むと、同一内容を 1 回の
+// 評価で二重に送ることになる。
 func buildSystemPrompt(req judge.Request) string {
-	var b strings.Builder
-	if strings.TrimSpace(req.System) != "" {
-		b.WriteString(req.System)
-	}
-	if len(req.Schema) > 0 {
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString("次の JSON Schema を満たす JSON オブジェクトのみを出力すること。前置きや説明文、コードフェンスは付けないこと。\n")
-		b.Write(req.Schema)
-	}
-	return b.String()
+	return strings.TrimSpace(req.System)
 }
 
 func (j *Judge) recordRun(r RunInfo) {

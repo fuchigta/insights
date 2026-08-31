@@ -25,7 +25,7 @@ var retroPromptTemplate string
 // 規約: これらのプロンプトの内容を変更したら、必ずこの値も変更すること。
 // 生成物の解釈（JSON スキーマ・観点）が変わった過去の Daily と新しいプロンプトの結果を
 // 混同しないようにするための目印であり、呼び出し側が Meta やキャッシュキーに使うことを想定する。
-const PromptVersion = "rollup-synth-v4"
+const PromptVersion = "rollup-synth-v5"
 
 // dailySchema は日報生成に期待する出力の JSON Schema。
 // internal/judge のバックエンドが `claude -p --json-schema` にそのまま渡せるよう、
