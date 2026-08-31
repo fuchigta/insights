@@ -203,16 +203,17 @@ func (d *DB) SaveSession(s *model.Session, costs []UsageCost) error {
 
 	if _, err := tx.Exec(`
 		INSERT INTO sessions (
-			session_id, source, project_path, project_label, git_branch, entrypoint,
+			session_id, source, project_path, project_label, git_branch, worktree, entrypoint,
 			is_sidechain, parent_session_id, started_at, ended_at, first_prompt, title,
 			transcript_path, content_hash, message_count, user_message_count,
 			assistant_message_count, tool_error_count, ingested_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			source                   = excluded.source,
 			project_path             = excluded.project_path,
 			project_label            = excluded.project_label,
 			git_branch               = excluded.git_branch,
+			worktree                 = excluded.worktree,
 			entrypoint               = excluded.entrypoint,
 			is_sidechain             = excluded.is_sidechain,
 			parent_session_id        = excluded.parent_session_id,
@@ -228,7 +229,7 @@ func (d *DB) SaveSession(s *model.Session, costs []UsageCost) error {
 			tool_error_count         = excluded.tool_error_count,
 			ingested_at              = excluded.ingested_at
 	`,
-		s.SessionID, s.Source, s.ProjectPath, s.ProjectLabel, s.GitBranch, s.Entrypoint,
+		s.SessionID, s.Source, s.ProjectPath, s.ProjectLabel, s.GitBranch, s.Worktree, s.Entrypoint,
 		boolToInt(s.IsSidechain), s.ParentSessionID, toUTCString(s.StartedAt), toUTCString(s.EndedAt),
 		s.FirstPrompt, s.Title, s.TranscriptPath, s.ContentHash, len(s.Messages), userCount,
 		assistantCount, toolErrorCount, ingestedAt,
@@ -574,7 +575,7 @@ func (d *DB) UnevaluatedSessions(from, to time.Time, promptVersion string) ([]st
 // SessionsInRange は started_at が [from, to] に含まれるセッションを開始時刻順に返す。
 func (d *DB) SessionsInRange(from, to time.Time) ([]SessionRow, error) {
 	rows, err := d.db.Query(`
-		SELECT session_id, project_label, project_path, started_at, ended_at, is_sidechain,
+		SELECT session_id, project_label, project_path, worktree, started_at, ended_at, is_sidechain,
 		       parent_session_id, entrypoint, first_prompt, title, message_count, tool_error_count, content_hash
 		FROM sessions
 		WHERE started_at >= ? AND started_at <= ?
@@ -591,7 +592,7 @@ func (d *DB) SessionsInRange(from, to time.Time) ([]SessionRow, error) {
 		var startedAt, endedAt string
 		var isSidechain int
 		if err := rows.Scan(
-			&r.SessionID, &r.ProjectLabel, &r.ProjectPath, &startedAt, &endedAt, &isSidechain,
+			&r.SessionID, &r.ProjectLabel, &r.ProjectPath, &r.Worktree, &startedAt, &endedAt, &isSidechain,
 			&r.ParentSessionID, &r.Entrypoint, &r.FirstPrompt, &r.Title, &r.MessageCount, &r.ToolErrorCount, &r.ContentHash,
 		); err != nil {
 			return nil, fmt.Errorf("sessions 行の読み取りに失敗: %w", err)
@@ -617,12 +618,12 @@ func (d *DB) SessionByID(id string) (*model.Session, error) {
 	var startedAt, endedAt string
 	var isSidechain int
 	err := d.db.QueryRow(`
-		SELECT session_id, source, project_path, project_label, git_branch, entrypoint,
+		SELECT session_id, source, project_path, project_label, git_branch, worktree, entrypoint,
 		       is_sidechain, parent_session_id, started_at, ended_at, first_prompt, title,
 		       transcript_path, content_hash
 		FROM sessions WHERE session_id = ?
 	`, id).Scan(
-		&s.SessionID, &s.Source, &s.ProjectPath, &s.ProjectLabel, &s.GitBranch, &s.Entrypoint,
+		&s.SessionID, &s.Source, &s.ProjectPath, &s.ProjectLabel, &s.GitBranch, &s.Worktree, &s.Entrypoint,
 		&isSidechain, &s.ParentSessionID, &startedAt, &endedAt, &s.FirstPrompt, &s.Title,
 		&s.TranscriptPath, &s.ContentHash,
 	)

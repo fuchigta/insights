@@ -593,6 +593,75 @@ func TestActions_CreateAndUpdateStatus(t *testing.T) {
 	}
 }
 
+// 旧バージョンで作られた DB（worktree 列が無い）を開いても、既存セッションが
+// 読めたうえで worktree を保存・復元できること。
+func TestMigrate_WorktreeColumnOnOldDatabase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "insights.db")
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatalf("schema_migrations の作成に失敗: %v", err)
+	}
+	if _, err := raw.Exec(schemaV1); err != nil {
+		t.Fatalf("schemaV1 の適用に失敗: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (1, ?)`, time.Now().UTC().Format(timeLayout)); err != nil {
+		t.Fatalf("schema_migrations への記録に失敗: %v", err)
+	}
+	if _, err := raw.Exec(`INSERT INTO sessions (session_id, source, project_path, started_at) VALUES (?, ?, ?, ?)`,
+		"sess-old", "claude-code", "/proj", time.Now().UTC().Format(timeLayout)); err != nil {
+		t.Fatalf("旧スキーマへのセッション保存に失敗: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("sql.DB.Close() error = %v", err)
+	}
+
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open()（旧 DB を開く）error = %v", err)
+	}
+	defer d.Close()
+
+	start := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	sess := &model.Session{
+		Source: "claude-code", SessionID: "sess-wt",
+		ProjectPath: "/proj", ProjectLabel: "proj", Worktree: "feat-x",
+		StartedAt: start, EndedAt: start.Add(time.Minute), ContentHash: "hash-wt",
+	}
+	if err := d.SaveSession(sess, nil); err != nil {
+		t.Fatalf("SaveSession() error = %v", err)
+	}
+
+	rows, err := d.SessionsInRange(start.Add(-time.Hour), start.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("SessionsInRange() error = %v", err)
+	}
+	var found bool
+	for _, r := range rows {
+		if r.SessionID == "sess-wt" {
+			found = true
+			if r.Worktree != "feat-x" {
+				t.Errorf("SessionRow.Worktree = %q, want %q", r.Worktree, "feat-x")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("保存したセッションが SessionsInRange に出てこない")
+	}
+
+	got, err := d.SessionByID("sess-wt")
+	if err != nil {
+		t.Fatalf("SessionByID() error = %v", err)
+	}
+	if got.Worktree != "feat-x" {
+		t.Errorf("SessionByID().Worktree = %q, want %q", got.Worktree, "feat-x")
+	}
+}
+
 // TestMigrate_UpgradesExistingV1Database は、v2 を知らないバージョンで作られた既存 DB を
 // 開いたときに、データを保ったまま session_evals の追加カラムが使えるようになることを確かめる。
 // 利用者の手元にあるのは必ず「前のバージョンで作られた DB」なので、新規作成のときだけ通っても

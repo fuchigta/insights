@@ -16,11 +16,15 @@ const (
 
 // Session は 1 セッション分の正規化済みトランスクリプト。
 type Session struct {
-	Source          string    // "claude-code" | "codex"
-	SessionID       string    // ソース内で一意
-	ProjectPath     string    // 作業ディレクトリの絶対パス
-	ProjectLabel    string    // 表示用の短縮名（末尾ディレクトリ名など）
-	GitBranch       string    // 不明なら空
+	Source       string // "claude-code" | "codex"
+	SessionID    string // ソース内で一意
+	ProjectPath  string // 作業ディレクトリの絶対パス
+	ProjectLabel string // 表示用の短縮名（末尾ディレクトリ名など）
+	GitBranch    string // 不明なら空
+	// Worktree はワークツリー配下のセッションのときだけ入るワークツリー名。
+	// ProjectPath は元のプロジェクト（リポジトリ）に寄せてあるため、どの
+	// ワークツリーでの作業だったかはこちらに残す。
+	Worktree        string
 	Entrypoint      string    // "cli" | "sdk-cli" など。自動実行の判別に使う
 	IsSidechain     bool      // サブエージェント実行
 	ParentSessionID string    // sidechain の親。不明なら空

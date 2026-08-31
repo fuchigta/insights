@@ -13,6 +13,7 @@ var migrations = []migration{
 	{version: 1, sql: schemaV1},
 	{version: 2, sql: schemaV2},
 	{version: 3, sql: schemaV3},
+	{version: 4, sql: schemaV4},
 }
 
 // schemaV1 は初期スキーマ。insights が正規化データを保存する全テーブルをここで作る。
@@ -166,4 +167,13 @@ CREATE TABLE IF NOT EXISTS eval_runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_eval_runs_created_at ON eval_runs(created_at);
+`
+
+// schemaV4 はワークツリーの列を足す。ワークツリー配下のセッションは
+// project_path を元のプロジェクトへ寄せて保存するため、どのワークツリーでの
+// 作業だったかを残す先がここまで無かった。
+//
+// 既存行は空文字のままでよい（ワークツリーではなかった、と同じ意味になる）。
+const schemaV4 = `
+ALTER TABLE sessions ADD COLUMN worktree TEXT NOT NULL DEFAULT '';
 `

@@ -235,6 +235,12 @@ func (s *Source) Parse(ref source.Ref) (*model.Session, error) {
 	if sess.ProjectPath == "" {
 		sess.ProjectPath = reconstructProjectPath(filepath.Base(filepath.Dir(ref.Path)))
 	}
+	// ワークツリー（<project>/.claude/worktree/<name>）は元のプロジェクトの作業として
+	// 扱う。cwd のままだとワークツリーの数だけ別プロジェクトに散ってしまう。
+	if base, worktree := splitWorktreePath(sess.ProjectPath); worktree != "" {
+		sess.ProjectPath = base
+		sess.Worktree = worktree
+	}
 	sess.ProjectLabel = lastPathElement(sess.ProjectPath)
 
 	// サブエージェント (<slug>/<parent-uuid>/subagents/agent-xxx.jsonl) は

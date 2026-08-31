@@ -70,6 +70,7 @@ type SessionRow struct {
 	SessionID       string
 	ProjectLabel    string
 	ProjectPath     string
+	Worktree        string // ワークツリー配下のセッションのみ。ProjectPath は元のプロジェクトを指す
 	StartedAt       time.Time
 	EndedAt         time.Time
 	IsSidechain     bool

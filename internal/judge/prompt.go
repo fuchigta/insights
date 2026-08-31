@@ -119,6 +119,11 @@ func buildMetaSection(s *model.Session) string {
 	b.WriteString("## セッション基本情報\n")
 	fmt.Fprintf(&b, "- プロジェクト: %s (%s)\n", orDash(s.ProjectLabel), orDash(s.ProjectPath))
 	fmt.Fprintf(&b, "- ブランチ: %s\n", orDash(s.GitBranch))
+	if strings.TrimSpace(s.Worktree) != "" {
+		// ワークツリーは元のプロジェクトに帰属させて集計しているので、
+		// どの作業ツリーだったのかはここで明示しないと評価者に見えない。
+		fmt.Fprintf(&b, "- ワークツリー: %s（元のプロジェクトでの並行作業）\n", s.Worktree)
+	}
 	fmt.Fprintf(&b, "- entrypoint: %s\n", orDash(s.Entrypoint))
 	fmt.Fprintf(&b, "- サブエージェント実行: %s\n", yesNo(s.IsSidechain))
 	if s.IsSidechain {
