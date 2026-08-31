@@ -2,9 +2,20 @@
 # コミット時の検査をまとめて走らせる。
 # 有効化: git config core.hooksPath .githooks
 #
-# doc-sync の逃げ道（Doc-Sync: skip）はコミットメッセージに書くため、
+# 逃げ道（Doc-Sync: skip / Unwanted-Files: skip）はコミットメッセージに書くため、
 # メッセージが確定する commit-msg で検査する（pre-commit ではまだ読めない）。
-set -eu
+#
+# set -e にしないのは、最初の 1 つで止めずに全部の問題をまとめて出すため。
+# 直すたびに次の失敗が出てくるのは、フックを疎まれる原因になる。
+set -u
+
+msg=$1
+status=0
+
 # git はフックをリポジトリのルートで実行する。
-scripts/check-commit-subject.sh "$(head -n 1 "$1")"
-scripts/check-doc-sync.sh --message "$1"
+scripts/check-commit-subject.sh "$(head -n 1 "$msg")" || status=1
+scripts/check-doc-sync.sh --message "$msg" || status=1
+scripts/check-doc-paths.sh || status=1
+scripts/check-unwanted-files.sh --message "$msg" || status=1
+
+exit "$status"

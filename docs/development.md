@@ -28,10 +28,14 @@
 - `lint`: `gofmt -l ./cmd ./internal` による整形チェックと、`go mod tidy` 実行後の `go.mod` / `go.sum` 差分チェック
 - `race`: `go test -race ./...`（評価の並行実行とストア書き込みの直列化の境界を競合検出器で確認）
 - `commit message`: Conventional Commits の検証（`scripts/check-commit-subject.sh`）
-- `doc sync`: コードとドキュメントの対応の検証（`scripts/check-doc-sync.sh`）。対応表
-  `scripts/doc-sync.tsv` に書いた組のうち、コード側だけが入っているコミットがあると落ちる。
-  ドキュメントに影響しない変更は、コミットメッセージ本文の `Doc-Sync: skip <理由>` で外す。
-  ローカルの `commit-msg` フックと CI は同じスクリプト・同じ逃げ道を使うので、判定がずれない
+- `repo guards`: 品質のドリフトを止める検査。ローカルの `commit-msg` フックと同じスクリプトを
+  同じ引数で呼ぶので、手元で通ったものは CI でも通る
+  - `scripts/check-doc-sync.sh`: コードとドキュメントの対応（対応表 `scripts/doc-sync.tsv`）。
+    片方だけが入っているコミットがあると落ちる。逃げ道は `Doc-Sync: skip <理由>`
+  - `scripts/check-doc-paths.sh`: ドキュメントが名指ししているパスの実在。まだ無いものを例として
+    挙げている参照は `scripts/doc-paths-ignore.txt` に理由付きで除外する
+  - `scripts/check-unwanted-files.sh`: セッションログ・データベース・巨大ファイルの混入。
+    逃げ道は `Unwanted-Files: skip <理由>`
 
 `claude` CLI は CI ランナーに無いため、AI を実際に呼ぶテストはスキップされ、CI 実行自体で課金が
 発生することはありません。

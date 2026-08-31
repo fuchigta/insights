@@ -81,19 +81,19 @@ jobs:
       - name: go test -race
         run: go test -race ./...
 
-  doc-sync:
-    name: doc sync
+  guards:
+    name: repo guards
     runs-on: ubuntu-latest
     steps:
-      # コミット単位で見るため履歴を全部持ってくる。
+      # コミット単位で見る検査があるため履歴を全部持ってくる。
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       # ローカルの commit-msg フックはすり抜けうる（フックは clone に含まれず、
       # 有効化も手動のため）。CI を最後の歯止めにする。逃げ道はコミットメッセージの
-      # `Doc-Sync: skip` なので、ローカルで通した判断はここでもそのまま通る。
-      - name: コードとドキュメントの対応の検証
+      # トレーラなので、ローカルで通した判断はここでもそのまま通る。
+      - name: コミット範囲の算出
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
@@ -108,7 +108,16 @@ jobs:
             range="-1 HEAD"
           fi
           echo "対象範囲: ${range}"
-          ./scripts/check-doc-sync.sh "${range}"
+          echo "RANGE=${range}" >> "$GITHUB_ENV"
+
+      - name: コードとドキュメントの対応
+        run: ./scripts/check-doc-sync.sh "$RANGE"
+
+      - name: ドキュメントが指すパスの実在
+        run: ./scripts/check-doc-paths.sh
+
+      - name: コミットしてはいけないものの混入
+        run: ./scripts/check-unwanted-files.sh "$RANGE"
 
   commit-lint:
     name: commit message
