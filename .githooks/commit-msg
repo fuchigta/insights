@@ -16,6 +16,7 @@ status=0
 scripts/check-commit-subject.sh "$(head -n 1 "$msg")" || status=1
 scripts/check-doc-sync.sh --message "$msg" || status=1
 scripts/check-doc-paths.sh || status=1
+scripts/check-commit-types.sh || status=1
 scripts/check-unwanted-files.sh --message "$msg" || status=1
 
 exit "$status"

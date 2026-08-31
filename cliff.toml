@@ -48,5 +48,6 @@ commit_parsers = [
   { message = '^chore\(release\)', skip = true },
   { message = "^ci", group = "<!-- 7 -->CI" },
   { message = "^chore", group = "<!-- 8 -->雑務" },
-  { message = ".*", group = "<!-- 9 -->その他" },
+  { message = "^revert", group = "<!-- 9 -->取り消し" },
+  { message = ".*", group = "<!-- 10 -->その他" },
 ]

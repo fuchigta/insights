@@ -36,6 +36,9 @@
     挙げている参照は `scripts/doc-paths-ignore.txt` に理由付きで除外する
   - `scripts/check-unwanted-files.sh`: セッションログ・データベース・巨大ファイルの混入。
     逃げ道は `Unwanted-Files: skip <理由>`
+  - `scripts/check-commit-types.sh`: Conventional Commits の type 一覧が `cliff.toml` /
+    `scripts/check-commit-subject.sh` / `CLAUDE.md` の 3 箇所で一致しているか。
+    1 箇所だけに足すと、通るのにリリースノートで「その他」に落ちる
 
 `claude` CLI は CI ランナーに無いため、AI を実際に呼ぶテストはスキップされ、CI 実行自体で課金が
 発生することはありません。

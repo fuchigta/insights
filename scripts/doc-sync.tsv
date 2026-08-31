@@ -38,5 +38,9 @@ internal/pricing/*	docs/cost.md
 # 1 回あたりの予算上限はコストの説明に既定値まで書いてある。
 internal/judge/claudecli/*.go	docs/cost.md	^[+-].*defaultMaxBudgetUSD
 
+# コミット時・CI で走る検査の一覧は開発ドキュメントに書いてある。
+scripts/check-*.sh	docs/development.md
+.githooks/*	docs/development.md
+
 # CI の内容は開発ドキュメントに書いてある。
 .github/workflows/*.yml	docs/development.md

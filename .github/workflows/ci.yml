@@ -119,6 +119,9 @@ jobs:
       - name: コミットしてはいけないものの混入
         run: ./scripts/check-unwanted-files.sh "$RANGE"
 
+      - name: コミット type 一覧の整合
+        run: ./scripts/check-commit-types.sh
+
   commit-lint:
     name: commit message
     runs-on: ubuntu-latest
