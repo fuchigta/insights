@@ -311,7 +311,8 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 		if sd.Eval == nil {
 			// 方針として評価しない sidechain は「評価に失敗・未実施」としてカウントしない。
 			// 評価対象外であることと評価漏れは別の問題であり、混同するとレポートの読者を惑わす。
-			if !row.IsSidechain {
+			// ワークツリーの sidechain は評価対象なので、未評価なら数える。
+			if !row.IsSidechain || row.IsWorktreeSidechain() {
 				d.Meta.UnevaluatedSessions++
 			}
 		} else {
@@ -338,22 +339,25 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 		calcOrder = append(calcOrder, row.SessionID)
 	}
 
-	// ---- Pass 2: 非 sidechain セッションのカード化（sidechain は独立したカードにしない） ----
+	// ---- Pass 2: セッションのカード化。sidechain は独立したカードにしないが、
+	// ワークツリーで動いたものだけは 1 本の作業として個別に扱う（親の「委譲 N 件」に
+	// 埋めると、その日の実作業の大半が誰にも読まれないまま消えるため）。----
 	cardByID := make(map[string]*SessionCard, len(calcs))
 	projectCards := map[string][]*SessionCard{}
 	for _, id := range calcOrder {
 		c := calcs[id]
-		if c.row.IsSidechain {
+		if c.row.IsSidechain && !c.row.IsWorktreeSidechain() {
 			continue
 		}
 		card := &SessionCard{
 			SessionID:       c.row.SessionID,
 			ProjectLabel:    c.row.ProjectLabel,
+			Worktree:        c.row.Worktree,
 			Title:           c.row.Title,
 			FirstPrompt:     c.row.FirstPrompt,
 			StartedAt:       c.row.StartedAt,
 			DurationMinutes: c.duration,
-			IsSidechain:     false,
+			IsSidechain:     c.row.IsSidechain,
 			Entrypoint:      c.row.Entrypoint,
 			Models:          c.models,
 			CostUSD:         c.cost,
@@ -369,7 +373,9 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 	// そのプロジェクトの RolledUp に計上する（合計を失わない）。----
 	for _, id := range calcOrder {
 		c := calcs[id]
-		if !c.row.IsSidechain {
+		if !c.row.IsSidechain || c.row.IsWorktreeSidechain() {
+			// ワークツリーのものは Pass 2 でカード化済み。ここで親にも足すと
+			// 同じコストを二重に数えることになる。
 			continue
 		}
 

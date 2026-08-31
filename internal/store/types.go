@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -81,6 +82,15 @@ type SessionRow struct {
 	MessageCount    int
 	ToolErrorCount  int
 	ContentHash     string
+}
+
+// IsWorktreeSidechain はワークツリー配下で動いたサブエージェントかを返す。
+//
+// サブエージェントは通常まとめて評価対象外にするが、ワークツリーは並列に本作業を
+// 進めるために切られるもので、中身は「親の小さな下請け」ではなくそれ自体が 1 本の
+// 作業になる。この 2 つは扱いを分ける必要があるため、判定をここに 1 つだけ置く。
+func (r SessionRow) IsWorktreeSidechain() bool {
+	return r.IsSidechain && strings.TrimSpace(r.Worktree) != ""
 }
 
 // UsageRow は usage_events 1 行分。集計（コスト・トークン量の期間合計など）に使う。

@@ -347,6 +347,80 @@ func TestBuildSeries_AchievedRatio(t *testing.T) {
 
 // ---- サブエージェント（sidechain）の畳み込み ----
 
+// ワークツリーで動いたサブエージェントは、親に畳まずそれ自体を 1 本の作業として扱う。
+// 個別に評価する対象なので、カードにならないと評価結果がどこにも出てこない。
+func TestBuildDaily_WorktreeSidechainIsItsOwnCard(t *testing.T) {
+	prices := testPrices(t)
+	base := mustTime(t, "2026-08-29T01:00:00Z")
+
+	in := DailyInput{
+		Date:   "2026-08-29",
+		Prices: prices,
+		Sessions: []SessionData{
+			{
+				Row: store.SessionRow{
+					SessionID: "s-parent", ProjectPath: "/p", ProjectLabel: "p", Entrypoint: "cli",
+					StartedAt: base, EndedAt: base.Add(20 * time.Minute),
+				},
+				Usage: []store.UsageRow{
+					{SessionID: "s-parent", Model: "claude-sonnet-5", InputTokens: 1, CostUSD: 1.0, CostKnown: true},
+				},
+			},
+			{
+				Row: store.SessionRow{
+					SessionID: "s-wt", ProjectPath: "/p", ProjectLabel: "p", Entrypoint: "cli",
+					Worktree: "feat-x", IsSidechain: true, ParentSessionID: "s-parent",
+					StartedAt: base.Add(time.Minute), EndedAt: base.Add(10 * time.Minute),
+				},
+				Usage: []store.UsageRow{
+					{SessionID: "s-wt", Model: "claude-sonnet-5", InputTokens: 1, CostUSD: 0.5, CostKnown: true},
+				},
+			},
+		},
+	}
+
+	d, err := BuildDaily(in)
+	if err != nil {
+		t.Fatalf("BuildDaily() error = %v", err)
+	}
+
+	cards := map[string]*SessionCard{}
+	for i := range d.Sessions {
+		cards[d.Sessions[i].SessionID] = &d.Sessions[i]
+	}
+	if len(cards) != 2 {
+		t.Fatalf("len(Sessions) = %d, want 2（ワークツリーの子も 1 枚のカードになる）", len(d.Sessions))
+	}
+
+	wt := cards["s-wt"]
+	if wt == nil {
+		t.Fatal("ワークツリーのセッションがカードになっていません")
+	}
+	if wt.Worktree != "feat-x" {
+		t.Errorf("wt.Worktree = %q, want feat-x", wt.Worktree)
+	}
+	if !wt.IsSidechain {
+		t.Error("wt.IsSidechain = false, want true（サブエージェントであること自体は変わらない）")
+	}
+	if wt.TotalCostUSD != 0.5 {
+		t.Errorf("wt.TotalCostUSD = %v, want 0.5", wt.TotalCostUSD)
+	}
+
+	parent := cards["s-parent"]
+	if parent.ChildCostUSD != 0 || parent.ChildSessions != 0 {
+		t.Errorf("親に畳み込まれています: ChildSessions=%d ChildCostUSD=%v（二重計上になる）",
+			parent.ChildSessions, parent.ChildCostUSD)
+	}
+	if parent.TotalCostUSD != 1.0 {
+		t.Errorf("parent.TotalCostUSD = %v, want 1.0", parent.TotalCostUSD)
+	}
+
+	// 日の合計は sidechain を含む全セッションの合計なので変わらない。
+	if d.Totals.CostUSD != 1.5 {
+		t.Errorf("Totals.CostUSD = %v, want 1.5", d.Totals.CostUSD)
+	}
+}
+
 func TestBuildDaily_SidechainFoldedIntoParent(t *testing.T) {
 	prices := testPrices(t)
 	base := mustTime(t, "2026-08-29T01:00:00Z")

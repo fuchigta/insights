@@ -105,7 +105,8 @@ type ProjectReview struct {
 type SessionCard struct {
 	SessionID       string      `json:"session_id"`
 	ProjectLabel    string      `json:"project_label"`
-	Title           string      `json:"title"` // ai-title / サブエージェントの description / 空
+	Worktree        string      `json:"worktree,omitempty"` // ワークツリーでの並行作業のみ
+	Title           string      `json:"title"`              // ai-title / サブエージェントの description / 空
 	FirstPrompt     string      `json:"first_prompt"`
 	StartedAt       time.Time   `json:"started_at"`
 	DurationMinutes float64     `json:"duration_minutes"`

@@ -39,6 +39,7 @@ type testSessionSpec struct {
 	ParentSessionID string
 	ProjectPath     string
 	ProjectLabel    string
+	Worktree        string
 	Title           string
 	FirstPrompt     string
 	StartedAt       time.Time
@@ -67,6 +68,7 @@ func saveTestSession(t *testing.T, db *store.DB, spec testSessionSpec) {
 		SessionID:       spec.SessionID,
 		ProjectPath:     spec.ProjectPath,
 		ProjectLabel:    spec.ProjectLabel,
+		Worktree:        spec.Worktree,
 		Entrypoint:      "cli",
 		IsSidechain:     spec.IsSidechain,
 		ParentSessionID: spec.ParentSessionID,

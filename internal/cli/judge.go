@@ -455,6 +455,9 @@ func buildChildSummaries(rows []store.SessionRow, costs map[string]*sessionCostA
 // prepareEvalTargets は SessionsInRange/UsageInRange の結果から、評価すべきセッション一覧
 // （サブエージェントを除外し、force で無ければキャッシュ済みも除外したもの）と、
 // 委譲要約・コスト集計を組み立てる。
+//
+// 例外として、ワークツリー配下で動いたサブエージェントは個別に評価する
+// （evaluatableSidechain）。
 func prepareEvalTargets(
 	db *store.DB,
 	rows []store.SessionRow,
@@ -467,7 +470,7 @@ func prepareEvalTargets(
 
 	var candidates []store.SessionRow
 	for _, r := range rows {
-		if r.IsSidechain {
+		if r.IsSidechain && !evaluatableSidechain(r) {
 			sidechainExcluded++
 			continue
 		}
@@ -489,6 +492,18 @@ func prepareEvalTargets(
 	}
 
 	return targets, sidechainExcluded, cacheSkipped, childrenByParent, costs, nil
+}
+
+// evaluatableSidechain は、サブエージェントでも個別に評価する例外かどうかを返す。
+//
+// サブエージェントを個別評価しないのは、実データの 7 割を占めるうえに 1 件あたりが
+// 小さく、評価しても具体的な行動に繋がりにくいため。ただしワークツリー
+// （<project>/.claude/worktree/<name>）で動いたものは事情が違う。ワークツリーは
+// 並列に本作業を進めるために切られるので、中身は「親の小さな下請け」ではなく
+// それ自体が 1 本の作業になる。親の「委譲 N 件」に埋めてしまうと、その日の実作業の
+// 大半が評価されないまま消える。
+func evaluatableSidechain(r store.SessionRow) bool {
+	return r.IsWorktreeSidechain()
 }
 
 // --- AI 評価の実行 ---
