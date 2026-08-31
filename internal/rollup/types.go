@@ -36,11 +36,6 @@ type Totals struct {
 	CacheReadTokens     int64   `json:"cache_read_tokens"`
 	CacheWriteTokens    int64   `json:"cache_write_tokens"`
 	CostUSD             float64 `json:"cost_usd"`
-	// CacheReuseRatio は cache_read / cache_write。キャッシュ読み取りは
-	// 未キャッシュ入力の 0.1 倍、書き込みは 1.25〜2 倍なので、この比が高いほど
-	// 文脈を安く運べている。低いと文脈が毎回作り直されている（無駄）。
-	// cache_write が 0 なら -1。
-	CacheReuseRatio float64 `json:"cache_reuse_ratio"`
 	// UnpricedEvents は単価が引けなかった usage の件数。0 でなければ CostUSD は過小評価。
 	UnpricedEvents int `json:"unpriced_events"`
 }

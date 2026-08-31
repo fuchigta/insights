@@ -338,16 +338,6 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 		calcOrder = append(calcOrder, row.SessionID)
 	}
 
-	// キャッシュ再利用比。公式ドキュメントによれば cache_read は未キャッシュ入力の 0.1 倍、
-	// cache_write は 1.25 倍（5分）/ 2 倍（1時間）なので、この比が高いほど長い文脈を
-	// 安く運べている（無駄ではない）。逆に低い（cache_write が相対的に多い）と、
-	// 文脈が毎回作り直されていて割高になっている。cache_write が 0 なら比を定義できないので -1。
-	if d.Totals.CacheWriteTokens > 0 {
-		d.Totals.CacheReuseRatio = float64(d.Totals.CacheReadTokens) / float64(d.Totals.CacheWriteTokens)
-	} else {
-		d.Totals.CacheReuseRatio = -1
-	}
-
 	// ---- Pass 2: 非 sidechain セッションのカード化（sidechain は独立したカードにしない） ----
 	cardByID := make(map[string]*SessionCard, len(calcs))
 	projectCards := map[string][]*SessionCard{}

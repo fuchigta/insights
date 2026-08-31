@@ -682,62 +682,6 @@ func TestBuildDaily_RollupThreshold_Override(t *testing.T) {
 	}
 }
 
-// ---- キャッシュ再利用比 ----
-
-func TestBuildDaily_CacheReuseRatio(t *testing.T) {
-	prices := testPrices(t)
-	base := mustTime(t, "2026-08-29T01:00:00Z")
-
-	in := DailyInput{
-		Date:   "2026-08-29",
-		Prices: prices,
-		Sessions: []SessionData{
-			{
-				Row: store.SessionRow{SessionID: "s1", ProjectPath: "/p", ProjectLabel: "p", Entrypoint: "cli", StartedAt: base, EndedAt: base},
-				Usage: []store.UsageRow{
-					{SessionID: "s1", Model: "claude-sonnet-5", CacheRead: 800, CacheCreation5m: 100, CostKnown: true},
-				},
-			},
-		},
-	}
-
-	d, err := BuildDaily(in)
-	if err != nil {
-		t.Fatalf("BuildDaily() error = %v", err)
-	}
-	if d.Totals.CacheReuseRatio != 8.0 {
-		t.Errorf("Totals.CacheReuseRatio = %v, want 8.0", d.Totals.CacheReuseRatio)
-	}
-}
-
-func TestBuildDaily_CacheReuseRatio_NoCacheWriteIsMinusOne(t *testing.T) {
-	prices := testPrices(t)
-	base := mustTime(t, "2026-08-29T01:00:00Z")
-
-	in := DailyInput{
-		Date:   "2026-08-29",
-		Prices: prices,
-		Sessions: []SessionData{
-			{
-				Row: store.SessionRow{SessionID: "s1", ProjectPath: "/p", ProjectLabel: "p", Entrypoint: "cli", StartedAt: base, EndedAt: base},
-				Usage: []store.UsageRow{
-					{SessionID: "s1", Model: "claude-sonnet-5", CacheRead: 800, CostKnown: true},
-				},
-			},
-		},
-	}
-
-	d, err := BuildDaily(in)
-	if err != nil {
-		t.Fatalf("BuildDaily() error = %v", err)
-	}
-	if d.Totals.CacheReuseRatio != -1 {
-		t.Errorf("Totals.CacheReuseRatio = %v, want -1（cache_write が 0 のとき）", d.Totals.CacheReuseRatio)
-	}
-}
-
-// ---- 決定性: sidechain の畳み込み・丸めを含めても同じ入力なら同じ出力になること ----
-
 func TestBuildDaily_Determinism_WithSidechainAndRollup(t *testing.T) {
 	prices := testPrices(t)
 	base := mustTime(t, "2026-08-29T01:00:00Z")

@@ -25,7 +25,7 @@ var retroPromptTemplate string
 // 規約: これらのプロンプトの内容を変更したら、必ずこの値も変更すること。
 // 生成物の解釈（JSON スキーマ・観点）が変わった過去の Daily と新しいプロンプトの結果を
 // 混同しないようにするための目印であり、呼び出し側が Meta やキャッシュキーに使うことを想定する。
-const PromptVersion = "rollup-synth-v3"
+const PromptVersion = "rollup-synth-v4"
 
 // dailySchema は日報生成に期待する出力の JSON Schema。
 // internal/judge のバックエンドが `claude -p --json-schema` にそのまま渡せるよう、
@@ -44,7 +44,7 @@ var dailySchema = json.RawMessage(`{
 		},
 		"body": {
 			"type": "string",
-			"description": "Markdown 形式の本文。プロジェクトをまたいだ活動を、時系列またはプロジェクト単位でまとめる。"
+			"description": "Markdown 形式の本文。プロジェクトをまたいだ活動を、時系列またはプロジェクト単位でまとめる。ユーザーがやったことと AI がやったことを読み分けられるように書く。"
 		},
 		"highlights": {
 			"type": "array",
@@ -74,11 +74,11 @@ var retroSchema = json.RawMessage(`{
 		},
 		"body": {
 			"type": "string",
-			"description": "Markdown 形式の本文。プロジェクト個別の当たり外れは project_reviews に譲り、モデル選択・オーナーシップ・キャッシュ効率など日を横断する所見のみを書く。"
+			"description": "Markdown 形式の本文。プロジェクト個別の当たり外れは project_reviews に譲り、任せ方・モデル選択と委譲・検収の傾向など日を横断する所見のみを書く。ユーザーの行動と AI の行動を区別して書く。"
 		},
 		"cost_observation": {
 			"type": "string",
-			"description": "コスト対価値の所見。cache_read/cache_write の比（cache_reuse_ratio）をどう解釈したかを含める。"
+			"description": "コストの所見。論点は「作業の中身に対して妥当なモデル・effort を選べていたか、高いモデルが抱えた単純作業を安いモデルへ委譲できなかったか」だけ。キャッシュの効き具合やトークン量には触れない（長いセッションでは自然に大きくなる値で、やり方の良し悪しを表さないため）。"
 		},
 		"proposals": {
 			"type": "array",
@@ -91,7 +91,7 @@ var retroSchema = json.RawMessage(`{
 					"title": {"type": "string"},
 					"detail": {
 						"type": "string",
-						"description": "後から実行有無を客観的に判定できる具体的な内容。「もっと丁寧にやる」のような検証不能な精神論は禁止。"
+						"description": "後から実行有無を客観的に判定できる具体的な内容。ユーザーの任せ方（依頼の仕方・作業の分け方・モデルと effort の選び方・委譲の仕方・検収の仕方）として書くこと。「もっと丁寧にやる」のような検証不能な精神論と、insights 自体への機能要望は禁止。"
 					},
 					"category": {"type": "string"}
 				}
@@ -144,7 +144,7 @@ var retroSchema = json.RawMessage(`{
 					},
 					"improvement": {
 						"type": "string",
-						"description": "このプロジェクトで次に変えること。無ければ空文字。"
+						"description": "このプロジェクトで次に変えること。ユーザーの任せ方として書く。無ければ空文字。"
 					}
 				}
 			}
@@ -172,7 +172,7 @@ type dailyContext struct {
 }
 
 // retroContext は振り返り生成 AI に渡す JSON コンテキスト。
-// Totals（cache_reuse_ratio を含む）と ByProject（プロジェクト単位の facets /
+// Totals と ByProject（プロジェクト単位の facets /
 // achieved_ratio / cost_share / highlights / rolled_up を含む）をそのまま渡すことで、
 // プロジェクト単位の振り返り（project_reviews）を書くための材料にする。
 type retroContext struct {
