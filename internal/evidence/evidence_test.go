@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fuchigta/insights/internal/config"
+	"github.com/fuchigta/insights/internal/model"
 )
 
 // requireGit は git が PATH に無い環境でテストをスキップする。
@@ -142,6 +143,140 @@ func TestCollectGitCommitOutsideTimeRange(t *testing.T) {
 	got := c.Collect(context.Background(), q)
 	if len(got) != 0 {
 		t.Fatalf("len(got) = %d, want 0 (got=%+v)", len(got), got)
+	}
+}
+
+// commitFileT は dir に file を書いてコミットする。
+func commitFileT(t *testing.T, dir, file, content, message string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitT(t, dir, "add", file)
+	runGitT(t, dir, "commit", "-m", message)
+}
+
+// titlesOf は収集結果の Title を集める（順序は git log 依存なので集合として見る）。
+func titlesOf(items []model.Evidence) map[string]bool {
+	got := map[string]bool{}
+	for _, e := range items {
+		got[e.Title] = true
+	}
+	return got
+}
+
+// マージ後に削除されたブランチでも、コミットが取れなくならないこと。
+// 作業ブランチは MR/PR のマージと同時に消えるのが普通で、そのとき
+// `git log <branch>` は unknown revision で失敗する。
+func TestCollectGitCommitMergedAndDeletedBranch(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	commitFileT(t, dir, "a.txt", "hello\n", "初回コミット")
+	runGitT(t, dir, "checkout", "-b", "feature/done")
+	commitFileT(t, dir, "b.txt", "feature\n", "機能を作り込む")
+	runGitT(t, dir, "checkout", "main")
+	runGitT(t, dir, "merge", "--no-ff", "feature/done", "-m", "feature/done をマージ")
+	runGitT(t, dir, "branch", "-D", "feature/done")
+
+	c := New(testEvidenceConfig())
+	if c.gitPath == "" {
+		t.Skip("git バイナリが検出されませんでした")
+	}
+
+	q := Query{
+		SessionID:   "session-merged",
+		ProjectPath: dir,
+		GitBranch:   "feature/done",
+		From:        time.Now().Add(-1 * time.Hour),
+		To:          time.Now().Add(1 * time.Hour),
+	}
+
+	got := titlesOf(c.Collect(context.Background(), q))
+	if !got["機能を作り込む"] {
+		t.Errorf("マージ済み・削除済みブランチのコミットが取れていません: %v", got)
+	}
+}
+
+// セッションのブランチがまだ残っていれば、そのブランチだけを辿ること。
+func TestCollectGitCommitExistingBranch(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	commitFileT(t, dir, "a.txt", "hello", "初回コミット")
+	runGitT(t, dir, "checkout", "-b", "feature/alive")
+	commitFileT(t, dir, "b.txt", "feature", "セッションのコミット")
+	runGitT(t, dir, "checkout", "main")
+
+	// セッションのブランチには入っていないコミット。
+	runGitT(t, dir, "checkout", "-b", "feature/other")
+	commitFileT(t, dir, "c.txt", "other", "無関係なコミット")
+	runGitT(t, dir, "checkout", "main")
+
+	c := New(testEvidenceConfig())
+	if c.gitPath == "" {
+		t.Skip("git バイナリが検出されませんでした")
+	}
+
+	q := Query{
+		SessionID:   "session-alive",
+		ProjectPath: dir,
+		GitBranch:   "feature/alive",
+		From:        time.Now().Add(-1 * time.Hour),
+		To:          time.Now().Add(1 * time.Hour),
+	}
+
+	got := titlesOf(c.Collect(context.Background(), q))
+	if !got["セッションのコミット"] {
+		t.Errorf("指定したブランチのコミットが取れていません: %v", got)
+	}
+	if got["無関係なコミット"] {
+		t.Errorf("指定していないブランチのコミットまで拾っています: %v", got)
+	}
+}
+
+// ローカルブランチが消えていてもリモート追跡ブランチが残っていれば、
+// そちらを辿ること（全 ref を舐めるフォールバックより絞り込めている）。
+func TestCollectGitCommitFallsBackToRemoteTrackingBranch(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	initRepo(t, dir)
+
+	commitFileT(t, dir, "a.txt", "hello\n", "初回コミット")
+
+	// セッションのブランチ: コミットしてリモート追跡 ref だけ残し、ローカルは消す。
+	runGitT(t, dir, "checkout", "-b", "feature/remote")
+	commitFileT(t, dir, "b.txt", "feature\n", "セッションのコミット")
+	runGitT(t, dir, "update-ref", "refs/remotes/origin/feature/remote", "HEAD")
+	runGitT(t, dir, "checkout", "main")
+	runGitT(t, dir, "branch", "-D", "feature/remote")
+
+	// 無関係なブランチ。--all にフォールバックすると混ざってしまう。
+	runGitT(t, dir, "checkout", "-b", "feature/other")
+	commitFileT(t, dir, "c.txt", "other\n", "無関係なコミット")
+	runGitT(t, dir, "checkout", "main")
+
+	c := New(testEvidenceConfig())
+	if c.gitPath == "" {
+		t.Skip("git バイナリが検出されませんでした")
+	}
+
+	q := Query{
+		SessionID:   "session-remote",
+		ProjectPath: dir,
+		GitBranch:   "feature/remote",
+		From:        time.Now().Add(-1 * time.Hour),
+		To:          time.Now().Add(1 * time.Hour),
+	}
+
+	got := titlesOf(c.Collect(context.Background(), q))
+	if !got["セッションのコミット"] {
+		t.Errorf("リモート追跡ブランチのコミットが取れていません: %v", got)
+	}
+	if got["無関係なコミット"] {
+		t.Errorf("リモート追跡ブランチではなく全 ref を舐めています: %v", got)
 	}
 }
 

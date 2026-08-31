@@ -25,6 +25,11 @@ import (
 // 必要が無く常に安定した形式になるためこちらを使う。
 const gitLogFormat = "%x1e%h%x1f%H%x1f%aI%x1f%s%x1f%b"
 
+// gitAllRefs は `git log` に渡すと全ての ref（ローカル・リモート追跡・タグ）を
+// 辿らせるオプション。セッション当時のブランチが既に消えているときの
+// フォールバックに使う。
+const gitAllRefs = "--all"
+
 // gitShortstatRe は `git log --shortstat` が本文の後ろに付け足す統計行にマッチする。
 // 例:
 //
@@ -58,17 +63,8 @@ func (c *Collector) gitRemoteURL(ctx context.Context, path string) (string, erro
 // 時間帯に該当するコミットが無ければ nil を返す（エラーではない）。
 func (c *Collector) collectGitCommits(ctx context.Context, q Query) []model.Evidence {
 	args := []string{"log"}
-
-	branch := strings.TrimSpace(q.GitBranch)
-	switch {
-	case branch == "":
-		// 何も指定しない = 現在のブランチ（HEAD）。
-	case strings.HasPrefix(branch, "-"):
-		// 外部由来の文字列。ハイフンで始まる値をそのまま渡すと git に
-		// オプションと誤認されかねないため、現在のブランチにフォールバックする。
-		slog.Warn("evidence: 不正なブランチ名のため現在のブランチを使用します", "branch", branch)
-	default:
-		args = append(args, branch)
+	if rev := c.resolveBranchRev(ctx, q); rev != "" {
+		args = append(args, rev)
 	}
 
 	if !q.From.IsZero() {
@@ -88,6 +84,57 @@ func (c *Collector) collectGitCommits(ctx context.Context, q Query) []model.Evid
 	}
 
 	return parseGitLog(q.SessionID, out)
+}
+
+// resolveBranchRev はセッションが記録していたブランチを、いま実際に辿れる
+// リビジョン指定へ解決する。戻り値が空文字なら「何も指定しない」＝現在の
+// ブランチ（HEAD）を意味する。
+//
+// セッション当時のブランチは、その後 MR/PR がマージされて削除されていること
+// が多い。そのまま `git log <branch>` を実行すると unknown revision で失敗し、
+// そのセッションのコミットが丸ごと取れなくなる。そこで次の順で辿る。
+//
+//  1. ローカルブランチがまだあればそれを使う（一番正確）
+//  2. 無ければリモート追跡ブランチ（origin/<branch>）を使う。ローカルだけ
+//     削除された直後はこちらが残っている
+//  3. どちらも無ければ gitAllRefs（--all）に切り替える。マージ済みのコミットは
+//     マージ先（origin/main など）から辿れるため、ここで拾える。他ブランチの
+//     コミットも混ざるが、時間帯で絞り込むため実害は小さく、「取れない」より
+//     「少し多めに取る」方を選ぶ
+func (c *Collector) resolveBranchRev(ctx context.Context, q Query) string {
+	branch := strings.TrimSpace(q.GitBranch)
+	if branch == "" {
+		// 何も指定しない = 現在のブランチ（HEAD）。
+		return ""
+	}
+	if strings.HasPrefix(branch, "-") {
+		// 外部由来の文字列。ハイフンで始まる値をそのまま渡すと git に
+		// オプションと誤認されかねないため、現在のブランチにフォールバックする。
+		slog.Warn("evidence: 不正なブランチ名のため現在のブランチを使用します", "branch", branch)
+		return ""
+	}
+
+	if c.revExists(ctx, q.ProjectPath, branch) {
+		return branch
+	}
+
+	remoteBranch := "origin/" + branch
+	if c.revExists(ctx, q.ProjectPath, remoteBranch) {
+		slog.Warn("evidence: ローカルブランチが見つからないためリモート追跡ブランチを使用します",
+			"session", q.SessionID, "branch", branch, "rev", remoteBranch)
+		return remoteBranch
+	}
+
+	slog.Warn("evidence: ブランチが見つかりません（マージ後に削除された可能性）。全ての ref からコミットを探します",
+		"session", q.SessionID, "branch", branch)
+	return gitAllRefs
+}
+
+// revExists は rev が解決可能なコミットを指すかを判定する。
+// `^{commit}` を付けて、タグやツリーではなくコミットに辿り着けることまで確かめる。
+func (c *Collector) revExists(ctx context.Context, path, rev string) bool {
+	_, err := c.runGit(ctx, path, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
+	return err == nil
 }
 
 // parseGitLog は gitLogFormat + --shortstat の出力を model.Evidence の列へ変換する。
