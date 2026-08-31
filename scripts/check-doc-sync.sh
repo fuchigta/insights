@@ -7,7 +7,12 @@
 #
 # 使い方:
 #   scripts/check-doc-sync.sh --message <ファイル>  # ステージ済みの変更（commit-msg フック）
-#   scripts/check-doc-sync.sh <git の範囲>          # コミット単位（CI）
+#   scripts/check-doc-sync.sh <git の範囲>          # 範囲をひとまとめ（CI）
+#
+# 範囲モードはコミット単位では見ず、範囲の端から端までの差分をひとまとめに見る。
+# コミット単位だと、PR で落ちたあとに「ドキュメントを直すコミットを足す」では直らず
+# （先の違反コミットは違反のまま）、履歴の書き換えを強いることになるため。main に載るか
+# どうかは PR 単位で決まるので、判定もその単位に合わせる。
 #
 # 逃げ道はコミットメッセージに書く。本文に次の行があるコミットは対象外になる。
 #
@@ -43,13 +48,17 @@ case ${1:-} in
     ;;
 esac
 
-# SHA は check_commit が見ている対象。空ならステージ済みの変更を見る。
-SHA=
+# git の空ツリー。根コミットを含む範囲の起点に使う。
+EMPTY_TREE=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+
+# RANGE_FROM / RANGE_TO は範囲モードで見る両端。空ならステージ済みの変更を見る。
+RANGE_FROM=
+RANGE_TO=
 
 # list_changed は対象に含まれる変更ファイルを出す。
 list_changed() {
-  if [ -n "$SHA" ]; then
-    git show --name-only --format= --diff-filter=ACMR "$SHA"
+  if [ -n "$RANGE_TO" ]; then
+    git diff --name-only --diff-filter=ACMR "$RANGE_FROM" "$RANGE_TO"
   else
     git diff --cached --name-only --diff-filter=ACMR
   fi
@@ -57,8 +66,8 @@ list_changed() {
 
 # diff_of はそのファイルの差分行だけを出す（対応表 3 列目の正規表現を当てるため）。
 diff_of() {
-  if [ -n "$SHA" ]; then
-    git show -U0 --format= "$SHA" -- "$1"
+  if [ -n "$RANGE_TO" ]; then
+    git diff -U0 "$RANGE_FROM" "$RANGE_TO" -- "$1"
   else
     git diff --cached -U0 -- "$1"
   fi
@@ -127,12 +136,25 @@ if [ "$mode" = "range" ]; then
   # マージコミットは自分では何も変更しないので対象外。
   # $range は分割させたいので引用しない（CI から "-1 HEAD" のような形も渡せる）。
   # shellcheck disable=SC2086
-  for sha in $(git rev-list --no-merges $range); do
-    SHA=$sha
-    check_commit "$(git log -1 --format=%B "$sha")" "（$(git log -1 --format="%h %s" "$sha")）" || status=1
-  done
+  commits=$(git rev-list --no-merges $range)
+
+  if [ -n "$commits" ]; then
+    newest=$(printf '%s
+' "$commits" | head -n 1)
+    oldest=$(printf '%s
+' "$commits" | tail -n 1)
+
+    # 範囲の手前（oldest の親）から newest までを 1 つの差分として見る。
+    # 根コミットには親が無いので、その場合は git の空ツリーを起点にする。
+    RANGE_FROM=$(git rev-parse -q --verify "$oldest^" || echo "$EMPTY_TREE")
+    RANGE_TO=$newest
+
+    # 逃げ道は範囲内のどれか 1 つに書いてあれば効く（判定が PR 単位なので、
+    # 免除の宣言も PR 単位で受け取る）。
+    # shellcheck disable=SC2086
+    check_commit "$(git log --format=%B $range)" "（$(git log -1 --format="%h %s" "$newest") までの範囲）" || status=1
+  fi
 else
-  SHA=
   msg=""
   if [ -n "$msgfile" ] && [ -f "$msgfile" ]; then
     msg=$(cat "$msgfile")
