@@ -71,6 +71,23 @@ func TestBuildDaily_EntrypointClassification(t *testing.T) {
 	if d.Totals.SidechainSessions != 1 {
 		t.Errorf("Totals.SidechainSessions = %d, want 1", d.Totals.SidechainSessions)
 	}
+
+	// 日報・振り返りのプロンプトは entrypoint の生値から自動実行かを判別できないので、
+	// 判定済みのラベルがカードに載っていること自体を固定する。
+	want := map[string]string{"s-interactive": "interactive", "s-automated": "automated"}
+	for _, card := range d.Sessions {
+		w, ok := want[card.SessionID]
+		if !ok {
+			continue
+		}
+		if card.ExecutionMode != w {
+			t.Errorf("%s の ExecutionMode = %q, want %q", card.SessionID, card.ExecutionMode, w)
+		}
+		delete(want, card.SessionID)
+	}
+	if len(want) != 0 {
+		t.Errorf("カードが見つからないセッションがある: %v", want)
+	}
 }
 
 func TestBuildDaily_UnknownModelNotSilentlyZero(t *testing.T) {

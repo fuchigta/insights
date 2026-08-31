@@ -77,6 +77,37 @@ func TestBuildSessionPrompt_MetaMessagesExcluded(t *testing.T) {
 	}
 }
 
+// TestBuildSessionPrompt_ExecutionMode は実行形態のラベルが台本に入ることを確認する。
+// 評価プロンプトは非対話実行のとき評価軸を読み替える（実行中の介入も検収もできないため）。
+// entrypoint の生値だけを渡していると評価側がその判別を推測に頼ることになるので、
+// 解釈済みのラベルが必ず出ることを固定する。
+func TestBuildSessionPrompt_ExecutionMode(t *testing.T) {
+	cases := []struct {
+		name       string
+		entrypoint string
+		want       string
+	}{
+		{name: "対話", entrypoint: "cli", want: "- 実行形態: 対話実行"},
+		{name: "非対話", entrypoint: "sdk-cli", want: "- 実行形態: 非対話実行"},
+		{name: "不明", entrypoint: "", want: "- 実行形態: 不明"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := baseSession()
+			s.Entrypoint = tc.entrypoint
+
+			out, err := BuildSessionPrompt(SessionPromptInput{Session: s})
+			if err != nil {
+				t.Fatalf("BuildSessionPrompt() error = %v", err)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("出力に %q が含まれていない: %q", tc.want, out)
+			}
+		})
+	}
+}
+
 func TestBuildSessionPrompt_EvidenceAndGoalEmbedded(t *testing.T) {
 	s := baseSession()
 	s.Messages = []model.Message{

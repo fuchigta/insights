@@ -103,20 +103,24 @@ type ProjectReview struct {
 
 // SessionCard は 1 セッションの要約。日報・振り返りの根拠として並べる。
 type SessionCard struct {
-	SessionID       string      `json:"session_id"`
-	ProjectLabel    string      `json:"project_label"`
-	Worktree        string      `json:"worktree,omitempty"` // ワークツリーでの並行作業のみ
-	Title           string      `json:"title"`              // ai-title / サブエージェントの description / 空
-	FirstPrompt     string      `json:"first_prompt"`
-	StartedAt       time.Time   `json:"started_at"`
-	DurationMinutes float64     `json:"duration_minutes"`
-	IsSidechain     bool        `json:"is_sidechain"`
-	Entrypoint      string      `json:"entrypoint"`
-	Models          []string    `json:"models"`
-	CostUSD         float64     `json:"cost_usd"` // このセッション自身のコスト（子を含まない）
-	Priced          bool        `json:"priced"`
-	EvidenceCount   int         `json:"evidence_count"`
-	Eval            *model.Eval `json:"eval,omitempty"` // 未評価なら nil
+	SessionID       string    `json:"session_id"`
+	ProjectLabel    string    `json:"project_label"`
+	Worktree        string    `json:"worktree,omitempty"` // ワークツリーでの並行作業のみ
+	Title           string    `json:"title"`              // ai-title / サブエージェントの description / 空
+	FirstPrompt     string    `json:"first_prompt"`
+	StartedAt       time.Time `json:"started_at"`
+	DurationMinutes float64   `json:"duration_minutes"`
+	IsSidechain     bool      `json:"is_sidechain"`
+	Entrypoint      string    `json:"entrypoint"`
+	// ExecutionMode は "interactive"（対話実行）か "automated"（`claude -p` などの
+	// 非対話実行）。日報・振り返りのプロンプトは entrypoint の生値から自動実行かを
+	// 推測できないため、判定済みの値を渡す。過去の daily_rollups には無いので空もありうる。
+	ExecutionMode string      `json:"execution_mode,omitempty"`
+	Models        []string    `json:"models"`
+	CostUSD       float64     `json:"cost_usd"` // このセッション自身のコスト（子を含まない）
+	Priced        bool        `json:"priced"`
+	EvidenceCount int         `json:"evidence_count"`
+	Eval          *model.Eval `json:"eval,omitempty"` // 未評価なら nil
 
 	// サブエージェント（sidechain）は独立したセッションとしては扱わず、
 	// 委譲元である親セッションにコストを計上する。子は情報量が少なく、

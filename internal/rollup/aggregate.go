@@ -14,19 +14,21 @@ import (
 	"github.com/fuchigta/insights/internal/store"
 )
 
-// nonInteractiveEntrypoints は「対話セッションではない」とみなす entrypoint の集合。
-// 実データでは Claude Agent SDK 経由の自動実行が "sdk-cli" として現れる。
-// 非対話とみなす entrypoint が増えたら、判定ロジックを触らずここに追記すればよい。
-var nonInteractiveEntrypoints = map[string]struct{}{
-	"sdk-cli": {},
+// isInteractiveEntrypoint は entrypoint が対話セッションかどうかを判定する。
+// 判定そのものは model.IsInteractiveEntrypoint に置いてある（評価プロンプト側でも
+// 同じ境界を使うため）。サブエージェント（IsSidechain）はこの判定の対象外で、
+// 呼び出し側で別枠（Totals.SidechainSessions）として数えること。
+func isInteractiveEntrypoint(entrypoint string) bool {
+	return model.IsInteractiveEntrypoint(entrypoint)
 }
 
-// isInteractiveEntrypoint は entrypoint が対話セッションかどうかを判定する。
-// サブエージェント（IsSidechain）はこの判定の対象外で、呼び出し側で別枠
-// （Totals.SidechainSessions）として数えること。
-func isInteractiveEntrypoint(entrypoint string) bool {
-	_, nonInteractive := nonInteractiveEntrypoints[entrypoint]
-	return !nonInteractive
+// executionMode は SessionCard に載せる実行形態のラベル。日報・振り返りの
+// プロンプトは "sdk-cli" が自動実行だという知識を持たないので、判定済みの値を渡す。
+func executionMode(entrypoint string) string {
+	if model.IsInteractiveEntrypoint(entrypoint) {
+		return "interactive"
+	}
+	return "automated"
 }
 
 // 丸め（Highlights / RolledUp への振り分け）の既定しきい値。
@@ -359,6 +361,7 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 			DurationMinutes: c.duration,
 			IsSidechain:     c.row.IsSidechain,
 			Entrypoint:      c.row.Entrypoint,
+			ExecutionMode:   executionMode(c.row.Entrypoint),
 			Models:          c.models,
 			CostUSD:         c.cost,
 			Priced:          c.allKnown,

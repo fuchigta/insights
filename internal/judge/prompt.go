@@ -125,6 +125,16 @@ func buildMetaSection(s *model.Session) string {
 		fmt.Fprintf(&b, "- ワークツリー: %s（元のプロジェクトでの並行作業）\n", s.Worktree)
 	}
 	fmt.Fprintf(&b, "- entrypoint: %s\n", orDash(s.Entrypoint))
+	// 実行形態は評価軸の読み替え（非対話では実行中の介入も検収も原理的にできない）に
+	// 直結するので、entrypoint の生値だけに解釈を委ねず、解釈済みのラベルも渡す。
+	switch {
+	case strings.TrimSpace(s.Entrypoint) == "":
+		b.WriteString("- 実行形態: 不明（entrypoint が取れていない。対話実行に準じて扱う）\n")
+	case model.IsInteractiveEntrypoint(s.Entrypoint):
+		b.WriteString("- 実行形態: 対話実行（ユーザーが同席し、実行中に軌道修正も検収もできる）\n")
+	default:
+		b.WriteString("- 実行形態: 非対話実行（claude -p などの自動実行。実行中にユーザーは介入も検収もできず、最初のプロンプトが仕様のすべて）\n")
+	}
 	fmt.Fprintf(&b, "- サブエージェント実行: %s\n", yesNo(s.IsSidechain))
 	if s.IsSidechain {
 		fmt.Fprintf(&b, "- 親セッションID: %s\n", orDash(s.ParentSessionID))
