@@ -1,6 +1,10 @@
 #!/bin/sh
-# Conventional Commits に従わないコミットを拒否する。
+# コミット時の検査をまとめて走らせる。
 # 有効化: git config core.hooksPath .githooks
+#
+# doc-sync の逃げ道（Doc-Sync: skip）はコミットメッセージに書くため、
+# メッセージが確定する commit-msg で検査する（pre-commit ではまだ読めない）。
 set -eu
 # git はフックをリポジトリのルートで実行する。
-exec scripts/check-commit-subject.sh "$(head -n 1 "$1")"
+scripts/check-commit-subject.sh "$(head -n 1 "$1")"
+scripts/check-doc-sync.sh --message "$1"

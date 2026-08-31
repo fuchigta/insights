@@ -81,6 +81,35 @@ jobs:
       - name: go test -race
         run: go test -race ./...
 
+  doc-sync:
+    name: doc sync
+    runs-on: ubuntu-latest
+    steps:
+      # コミット単位で見るため履歴を全部持ってくる。
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # ローカルの commit-msg フックはすり抜けうる（フックは clone に含まれず、
+      # 有効化も手動のため）。CI を最後の歯止めにする。逃げ道はコミットメッセージの
+      # `Doc-Sync: skip` なので、ローカルで通した判断はここでもそのまま通る。
+      - name: コードとドキュメントの対応の検証
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            range="origin/${BASE}..HEAD"
+          elif [ -n "${BEFORE:-}" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            range="${BEFORE}..${GITHUB_SHA}"
+          else
+            # 新しいブランチの初回 push など、比較対象が無い場合は先頭のみ見る。
+            range="-1 HEAD"
+          fi
+          echo "対象範囲: ${range}"
+          ./scripts/check-doc-sync.sh "${range}"
+
   commit-lint:
     name: commit message
     runs-on: ubuntu-latest
