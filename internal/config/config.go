@@ -270,19 +270,45 @@ func (c *Config) Validate() []error {
 }
 
 // ExcludesProject は path が exclude.projects に含まれるかを判定する。
-// 比較前に filepath.Clean + strings.EqualFold で正規化し、大文字小文字・
-// パス区切りの差（Windows 前提）を吸収する。
+// 比較前に normalizeForCompare で正規化し、~ / $HOME の展開、パス区切り
+// （Windows 前提）、大文字小文字、末尾スラッシュの差を吸収する。
+//
+// 一致は完全一致だけでなく「配下」も含める。除外したい単位はたいてい
+// ディレクトリであり（作業用の一時ディレクトリ、業務リポジトリの置き場など）、
+// その下に切られる個々のプロジェクトを 1 つずつ書き並べるのは現実的でない。
 func (c *Config) ExcludesProject(path string) bool {
 	target := normalizeForCompare(path)
 	if target == "" {
 		return false
 	}
 	for _, p := range c.Exclude.Projects {
-		if strings.EqualFold(normalizeForCompare(p), target) {
+		if pathAtOrUnder(target, normalizeForCompare(p)) {
 			return true
 		}
 	}
 	return false
+}
+
+// pathAtOrUnder は target が root 自身か、その配下かを判定する。
+// 引数はいずれも normalizeForCompare 済み（区切りが "/"）であること。
+//
+// 単なる前方一致にはしない。"/a/foo" が "/a/foobar" を除外してしまうため、
+// 境界は必ずセパレータで区切る。
+func pathAtOrUnder(target, root string) bool {
+	if root == "" || target == "" {
+		return false
+	}
+	// 大文字小文字を無視するため両方を畳んでから比べる。EqualFold + バイト
+	// スライスだと多バイト文字の途中で切れ得るので、先に ToLower して揃える。
+	lt := strings.ToLower(target)
+	lr := strings.ToLower(root)
+	if lt == lr {
+		return true
+	}
+	if !strings.HasSuffix(lr, "/") {
+		lr += "/"
+	}
+	return strings.HasPrefix(lt, lr)
 }
 
 // GoalFor は projectPath に一致する goals.projects の値を返す。

@@ -58,11 +58,33 @@ pricing:
 | `report.rollup.cost_share` | 振り返りのプロジェクト別セッション一覧で、個別に載せず「その他 N 件」に丸める基準のひとつ。その日の総コストに対する割合（0..1）。**この割合と `report.rollup.duration_minutes` の両方を下回るセッションだけが丸められます**（どちらか一方でも上回れば個別掲載） | `0.01`（1%） |
 | `report.rollup.duration_minutes` | 上記の丸め基準のもう一方。セッションの所要時間（分） | `10` |
 | `database` | SQLite DB のパス | `~/.insights/insights.db` |
-| `exclude.projects` | 除外するプロジェクトパスの一覧。取り込み・評価・レポートのすべてで対象外になる | `[]` |
+| `exclude.projects` | 除外するプロジェクトパスの一覧。**その配下も対象**。取り込み・評価・レポートのすべてで対象外になる | `[]` |
 | `exclude.entrypoints` | 除外する entrypoint（例: 特定の自動実行経路）の一覧。同上 | `[]` |
 | `goals.global` | レポート全体で重視する価値の説明文。評価プロンプトに渡り、判定の物差しになる | `""` |
 | `goals.projects` | プロジェクトパスごとの重視する価値。一致すれば `goals.global` より優先される | `{}` |
 | `pricing.overrides` | モデルごとの単価上書き（`input` / `output` / `cache_write_5m` / `cache_write_1h` / `cache_read`、単位は 1M トークンあたり USD） | `{}` |
+
+## 除外するパスの書き方
+
+`exclude.projects` の比較では次を吸収します。手で正規化する必要はありません。
+
+- `~` / `~/...` / `$HOME` の展開
+- パス区切りの差（`C:\Users\me\src` と `C:/Users/me/src` は同じ）
+- 大文字小文字の差、末尾のスラッシュ
+
+そして**書いたディレクトリの配下も除外されます**。作業用の一時ディレクトリのように、
+その下に毎回違う名前のディレクトリが切られる場合でも 1 行で済みます。
+
+```yaml
+exclude:
+  projects:
+    - ~/AppData/Local/Temp   # 配下の作業ディレクトリごと落ちる
+    - G:/マイドライブ/obsidian
+```
+
+境界はパス区切りで判定するので、`~/src/foo` と書いても `~/src/foobar` は除外されません。
+Windows のパスを `"..."`（二重引用符）で囲むと YAML が `\` をエスケープとして解釈するため、
+引用符なしか `'...'`（単一引用符）で書くか、`/` 区切りにしてください。
 
 ## 除外はいつ効くか
 

@@ -171,6 +171,13 @@ func TestExcludesProject(t *testing.T) {
 		{"forward slashes", `C:/Users/fuchigta/src/github.com/fuchigta/insights`, true},
 		{"trailing slash", `C:\Users\fuchigta\src\github.com\fuchigta\insights\`, true},
 		{"no match", `C:\Users\fuchigta\src\github.com\fuchigta\other`, false},
+		// 除外したい単位はディレクトリなので、その配下も除外に含める。
+		{"under the excluded dir", `C:\Users\fuchigta\src\github.com\fuchigta\insights\internal\cli`, true},
+		{"under, forward slashes", `C:/Users/fuchigta/src/github.com/fuchigta/insights/docs`, true},
+		// 前方一致だけだと "insights-old" のような兄弟まで巻き込むので境界を見る。
+		{"sibling with same prefix", `C:\Users\fuchigta\src\github.com\fuchigta\insights-old`, false},
+		// 親ディレクトリは配下ではない。
+		{"parent of the excluded dir", `C:\Users\fuchigta\src\github.com\fuchigta`, false},
 	}
 
 	for _, tc := range cases {
@@ -179,6 +186,32 @@ func TestExcludesProject(t *testing.T) {
 				t.Errorf("ExcludesProject(%q) = %v, want %v", tc.path, got, tc.want)
 			}
 		})
+	}
+}
+
+// 実際に効いてほしいのは「一時ディレクトリごと除外する」という書き方。
+// 配下の作業ディレクトリが 1 つずつ別プロジェクトとして記録されるため、
+// 親を 1 行書けば全部落ちること。
+func TestExcludesProjectUnderTempDir(t *testing.T) {
+	cfg := Default()
+	cfg.Exclude.Projects = []string{"~/AppData/Local/Temp"}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("ホームディレクトリを取得できないためスキップします")
+	}
+
+	under := filepath.Join(home, "AppData", "Local", "Temp", "claude_judge_workdir_debug")
+	if !cfg.ExcludesProject(under) {
+		t.Errorf("ExcludesProject(%q) = false, want true（~ 展開 + 配下判定）", under)
+	}
+	self := filepath.Join(home, "AppData", "Local", "Temp")
+	if !cfg.ExcludesProject(self) {
+		t.Errorf("ExcludesProject(%q) = false, want true（ディレクトリ自身）", self)
+	}
+	outside := filepath.Join(home, "AppData", "Local", "TempFiles")
+	if cfg.ExcludesProject(outside) {
+		t.Errorf("ExcludesProject(%q) = true, want false（名前が前方一致するだけの別ディレクトリ）", outside)
 	}
 }
 
