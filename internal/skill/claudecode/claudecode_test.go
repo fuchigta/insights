@@ -115,7 +115,7 @@ func TestInstallThenStatusCurrent(t *testing.T) {
 		t.Fatalf("len(Result.Written) = %d, want 1", len(result.Written))
 	}
 
-	dest := filepath.Join(result.Path, skillFileName)
+	dest := filepath.Join(result.Path, skill.SkillFileName)
 	data, err := os.ReadFile(dest)
 	if err != nil {
 		t.Fatalf("ReadFile(%s): %v", dest, err)
@@ -147,7 +147,7 @@ func TestStatusModifiedAndForce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Target() error = %v", err)
 	}
-	dest := filepath.Join(target, skillFileName)
+	dest := filepath.Join(target, skill.SkillFileName)
 
 	original, err := os.ReadFile(dest)
 	if err != nil {
@@ -198,7 +198,7 @@ func TestStatusOutdated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Target() error = %v", err)
 	}
-	dest := filepath.Join(target, skillFileName)
+	dest := filepath.Join(target, skill.SkillFileName)
 
 	original, err := os.ReadFile(dest)
 	if err != nil {
@@ -257,47 +257,12 @@ func TestUninstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Target() error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(target, skillFileName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(target, skill.SkillFileName)); !os.IsNotExist(err) {
 		t.Errorf("SKILL.md が残っています: err = %v", err)
 	}
 
 	// 2 回目の Uninstall も成功する。
 	if err := i.Uninstall(skill.ScopeUser); err != nil {
 		t.Fatalf("Uninstall(2 回目) error = %v", err)
-	}
-}
-
-func TestParseFrontMatter(t *testing.T) {
-	fm, err := parseFrontMatter(assets.SkillMD())
-	if err != nil {
-		t.Fatalf("parseFrontMatter() error = %v", err)
-	}
-	if fm.Name != "insights" {
-		t.Errorf("Name = %q, want %q", fm.Name, "insights")
-	}
-	if fm.version() != assets.Version {
-		t.Errorf("version() = %q, want %q", fm.version(), assets.Version)
-	}
-}
-
-// TestParseFrontMatter_LegacyVersionKey は、metadata へ移す前に配置された SKILL.md
-// （トップレベルの x-insights-version）からもバージョンを読めることを確認する。
-// 読めないと、旧バージョンの導入済みスキルが outdated ではなく「改変済み」に見え、
-// 再インストールに --force を要求してしまう。
-func TestParseFrontMatter_LegacyVersionKey(t *testing.T) {
-	legacy := []byte(`---
-name: insights
-x-insights-version: "1"
----
-
-# insights
-`)
-
-	fm, err := parseFrontMatter(legacy)
-	if err != nil {
-		t.Fatalf("parseFrontMatter() error = %v", err)
-	}
-	if fm.version() != "1" {
-		t.Errorf("version() = %q, want %q", fm.version(), "1")
 	}
 }
