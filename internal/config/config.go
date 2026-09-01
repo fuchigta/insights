@@ -30,14 +30,27 @@ type Config struct {
 	Pricing  PricingConfig  `yaml:"pricing"`
 }
 
-// SourcesConfig はログソースごとの設定。将来 codex などを追加する。
+// SourcesConfig はログソースごとの設定。
 type SourcesConfig struct {
 	ClaudeCode ClaudeCodeSource `yaml:"claude-code"`
+	Codex      CodexSource      `yaml:"codex"`
 }
 
 // ClaudeCodeSource は Claude Code ログの置き場設定。
 type ClaudeCodeSource struct {
 	Root    string `yaml:"root"` // ~/.claude 相当。projects/ サブディレクトリを見る
+	Enabled bool   `yaml:"enabled"`
+}
+
+// CodexSource は Codex ログの置き場設定。
+//
+// 既定で有効にしてあるが、ログ置き場が無い環境ではそのソースを黙って飛ばす
+// （internal/cli の buildSources）。Codex を使っていない利用者に設定を強いる
+// より、使い始めたら自動で拾えるほうが取りこぼしが少ない。
+type CodexSource struct {
+	// Root は $CODEX_HOME 相当（既定 ~/.codex）。sessions/ と archived_sessions/ を見る。
+	// 空なら環境変数 CODEX_HOME、それも無ければ ~/.codex を推定する。
+	Root    string `yaml:"root"`
 	Enabled bool   `yaml:"enabled"`
 }
 
@@ -119,6 +132,13 @@ func Default() *Config {
 		Sources: SourcesConfig{
 			ClaudeCode: ClaudeCodeSource{
 				Root:    "~/.claude",
+				Enabled: true,
+			},
+			Codex: CodexSource{
+				// 既定は空。Codex は $CODEX_HOME でログ置き場を移せるので、
+				// "~/.codex" を書き込んでしまうと移している利用者のログを
+				// 取りこぼす。空にしておけば実行時に環境変数を見て解決する。
+				Root:    "",
 				Enabled: true,
 			},
 		},

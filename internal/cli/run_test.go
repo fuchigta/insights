@@ -32,6 +32,7 @@ func TestRun_EmptyDayAllStagesSucceedWithoutAI(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Sources.ClaudeCode.Root = fakeClaudeHome
+	isolateCodexSource(t, cfg)
 	cfg.Evidence.Git = false
 	cfg.Evidence.Gh = config.TristateFalse
 	cfg.Evidence.Glab = config.TristateFalse
@@ -93,6 +94,7 @@ func TestRun_JudgeStageRequiresYesInNonInteractiveEnv(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Sources.ClaudeCode.Root = fakeClaudeHome
+	isolateCodexSource(t, cfg)
 	cfg.Evidence.Git = false
 	cfg.Evidence.Gh = config.TristateFalse
 	cfg.Evidence.Glab = config.TristateFalse

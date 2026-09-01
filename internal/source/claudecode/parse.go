@@ -3,8 +3,6 @@ package claudecode
 import (
 	"bufio"
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -256,7 +254,7 @@ func (s *Source) Parse(ref source.Ref) (*model.Session, error) {
 		sess.Title = loadAgentMetaDescription(ref.Path)
 	}
 
-	sess.ContentHash = contentHash(sess.Messages)
+	sess.ContentHash = model.ContentHash(sess.Messages)
 
 	return sess, nil
 }
@@ -478,14 +476,4 @@ func truncateText(s string, maxLen int) string {
 		return s
 	}
 	return string(r[:maxLen])
-}
-
-// contentHash は正規化後の全メッセージ（Role/Model/ToolName/Text）から SHA-256 を計算する。
-// フィールド間・メッセージ間を制御文字で区切り、値の中身が偶然一致しても衝突しないようにする。
-func contentHash(messages []model.Message) string {
-	h := sha256.New()
-	for _, m := range messages {
-		fmt.Fprintf(h, "%s\x1f%s\x1f%s\x1f%s\x1e", m.Role, m.Model, m.ToolName, m.Text)
-	}
-	return hex.EncodeToString(h.Sum(nil))
 }

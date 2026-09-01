@@ -53,17 +53,25 @@ func sessionSizeBucket(messages int) string {
 
 // evalCostEstimator は評価コストの実績を区分ごとに保持し、見積もりを返す。
 type evalCostEstimator struct {
-	model    string
-	byBucket map[string][]float64 // 区分ごとの実コスト（昇順）
-	all      []float64            // 区分によらない全実績（昇順）
+	model string
+	// reportsCost はバックエンドが実費を報告するか（internal/cli/deps.go の
+	// judgeReportsCost）。報告しないバックエンドでは実績も既定値も意味を持たないので、
+	// 金額を作らずに「分からない」と言う。
+	reportsCost bool
+	byBucket    map[string][]float64 // 区分ごとの実コスト（昇順）
+	all         []float64            // 区分によらない全実績（昇順）
 }
 
 // newEvalCostEstimator は DB の実績から見積もり器を作る。実績が引けなくても
 // 見積もり自体は既定値で成立するため、エラーは返さず空の見積もり器を返す
 // （見積もりのために評価を止めるのは本末転倒なので）。
-func newEvalCostEstimator(db *store.DB, model string) *evalCostEstimator {
-	e := &evalCostEstimator{model: model, byBucket: map[string][]float64{}}
-	if db == nil {
+func newEvalCostEstimator(db *store.DB, model, backend string) *evalCostEstimator {
+	e := &evalCostEstimator{
+		model:       model,
+		reportsCost: judgeReportsCost(backend),
+		byBucket:    map[string][]float64{},
+	}
+	if db == nil || !e.reportsCost {
 		return e
 	}
 	samples, err := db.RecentEvalCostSamples(model, evalCostSampleLimit)
@@ -87,6 +95,10 @@ func newEvalCostEstimator(db *store.DB, model string) *evalCostEstimator {
 // 区分の実績 → 区分によらない実績 → 既定値、の順に落ちる。区分の実績が貯まるまでは
 // 全体の実績で見積もるほうが、固定値よりは実態に近い。
 func (e *evalCostEstimator) perSession(messages int) (float64, bool) {
+	if !e.reportsCost {
+		// 実費を報告しないバックエンドでは、それらしい数字を作るほうが有害。
+		return 0, false
+	}
 	if v, ok := percentileOf(e.byBucket[sessionSizeBucket(messages)], evalCostPercentile); ok {
 		return v, true
 	}
@@ -112,6 +124,8 @@ func (e *evalCostEstimator) estimateTargets(targets []store.SessionRow) (total f
 // 「何を根拠に出した数字か」が分からないと、確認そのものが儀式になってしまう。
 func (e *evalCostEstimator) estimateBasis(fromActual, total int) string {
 	switch {
+	case !e.reportsCost:
+		return "見積もりの根拠: このバックエンドは実費を報告しないため、コストを見積もれません（$0 という意味ではありません）"
 	case fromActual == 0:
 		return "見積もりの根拠: 実績がまだ無いため既定値（実測に基づく概算）を使っています"
 	case fromActual < total:

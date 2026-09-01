@@ -10,9 +10,11 @@ import (
 
 	"github.com/fuchigta/insights/internal/skill"
 	// internal/skill はインポート循環を避けるため自己登録方式を採っている
-	// （internal/skill/registry.go 参照）。skill.ByAgent("claude-code") を解決できるよう、
-	// 実装パッケージを副作用インポートしてレジストリに登録させる。
+	// （internal/skill/registry.go 参照）。skill.ByAgent("claude-code") /
+	// skill.ByAgent("codex") を解決できるよう、実装パッケージを副作用インポートして
+	// レジストリに登録させる。
 	_ "github.com/fuchigta/insights/internal/skill/claudecode"
+	_ "github.com/fuchigta/insights/internal/skill/codex"
 	"github.com/spf13/cobra"
 )
 
@@ -71,7 +73,7 @@ func newSkillInstallCommand() *cobra.Command {
 			return runSkillInstall(cmd, agent, scopeStr, force)
 		},
 	}
-	cmd.Flags().StringVar(&agent, "agent", "claude-code", "対象のコーディングエージェント")
+	cmd.Flags().StringVar(&agent, "agent", "claude-code", "対象のコーディングエージェント (claude-code|codex)")
 	cmd.Flags().StringVar(&scopeStr, "scope", "user", "導入範囲 (user|project)")
 	cmd.Flags().BoolVar(&force, "force", false, "手で書き換えられたスキルを上書きする")
 	return cmd
@@ -92,7 +94,7 @@ func newSkillStatusCommand() *cobra.Command {
 			return runSkillStatus(cmd, agent, scopeStr)
 		},
 	}
-	cmd.Flags().StringVar(&agent, "agent", "claude-code", "対象のコーディングエージェント")
+	cmd.Flags().StringVar(&agent, "agent", "claude-code", "対象のコーディングエージェント (claude-code|codex)")
 	cmd.Flags().StringVar(&scopeStr, "scope", "user", "導入範囲 (user|project)")
 	return cmd
 }
@@ -112,7 +114,7 @@ func newSkillUninstallCommand() *cobra.Command {
 			return runSkillUninstall(cmd, agent, scopeStr)
 		},
 	}
-	cmd.Flags().StringVar(&agent, "agent", "claude-code", "対象のコーディングエージェント")
+	cmd.Flags().StringVar(&agent, "agent", "claude-code", "対象のコーディングエージェント (claude-code|codex)")
 	cmd.Flags().StringVar(&scopeStr, "scope", "user", "導入範囲 (user|project)")
 	return cmd
 }

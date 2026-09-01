@@ -6,7 +6,8 @@ Claude Code などのコーディングエージェントの利用を、**PR 数
 セッションログを日次で SQLite に集約し、`claude -p` で各セッションを定性評価し、日報と振り返りを生成し、
 改善提案を出し、次回その提案が実行されたかを検証する——このループを閉じることが目的です。
 
-対応ログソースは今のところ Claude Code のみです。既存のログを後から読むだけで完結します。
+対応ログソースは **Claude Code と Codex** です。どちらも既存のログを後から読むだけで完結し、
+1 つの DB・1 つのレポートにまとめて集計されます。
 
 ## インストール
 
@@ -42,7 +43,7 @@ go install github.com/fuchigta/insights/cmd/insights@latest
 # 1. 設定ファイルの雛形を書き出す（既定: ~/.insights/config.yaml）
 insights config init
 
-# 2. 依存関係とログの状態を診断する（claude/git/gh/glab の疎通、ログの取りこぼしリスクを確認）
+# 2. 依存関係とログの状態を診断する（claude/codex/git/gh/glab の疎通、ログの検出状況を確認）
 insights config doctor
 
 # 3. 既存ログを全件取り込む（初回のみ --all。以降は差分取り込みで十分）
@@ -68,7 +69,7 @@ cron やタスクスケジューラから実行する場合は、確認を省略
 | `run` | `ingest` → `judge` → `daily` を一括実行する。定期実行向け（課金発生） |
 | `actions list` \| `show ID` | 振り返りが生成した改善提案の状態を確認する |
 | `actions drop ID...` \| `reopen ID...` | 改善提案を見送り(dropped)にする／未着手に戻す |
-| `skill install` \| `status` \| `uninstall` | 他のコーディングエージェント向けにスキルを導入・確認・削除する |
+| `skill install` \| `status` \| `uninstall` | 他のコーディングエージェント（`--agent claude-code` \| `codex`）向けにスキルを導入・確認・削除する |
 
 各コマンドの詳細フラグは `insights <command> --help`、または [docs/configuration.md](docs/configuration.md) を参照してください。
 
@@ -84,11 +85,13 @@ cron やタスクスケジューラから実行する場合は、確認を省略
 
 - **Claude Code のログは約30日で自動削除されます。** 日次で `insights run` を回さないと、振り返りの
   母集団が失われ、二度と復元できません。定期実行の設定は [docs/scheduling.md](docs/scheduling.md) を参照してください。
+  （Codex のログに自動削除はありません。7 日ほどで zstd に圧縮されますが、insights はそのまま読めます。）
 - **`insights judge` / `daily` / `run` は課金が発生します。** これらは内部で `claude -p` を呼びますが、
   `claude -p` は Claude Code のサブスクリプション枠ではなく **API の従量枠**を消費します。詳細は
   [docs/cost.md](docs/cost.md) を参照してください。
 - **セッションの会話本文は、マスキングせずに評価へ渡されます。** ツールが読んだファイルの中身も
-  含まれうるため、送信先（Claude 本体）とその判断の理由を [docs/privacy.md](docs/privacy.md) に記載しています。
+  含まれうるため、送信先（既定では Claude 本体。`judge.backend` の設定によっては Codex）とその判断の
+  理由を [docs/privacy.md](docs/privacy.md) に記載しています。
 
 ## ドキュメント
 

@@ -69,6 +69,7 @@ type EvalRunStats struct {
 // SessionByID のようにメッセージ全件を復元するコストをかけずに一覧表示や集計に使う。
 type SessionRow struct {
 	SessionID       string
+	Source          string // ログソース識別子（"claude-code" / "codex"）
 	ProjectLabel    string
 	ProjectPath     string
 	Worktree        string // ワークツリー配下のセッションのみ。ProjectPath は元のプロジェクトを指す

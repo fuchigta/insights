@@ -3,6 +3,7 @@ module github.com/fuchigta/insights
 go 1.25.0
 
 require (
+	github.com/klauspost/compress v1.19.2
 	github.com/mattn/go-isatty v0.0.24
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1

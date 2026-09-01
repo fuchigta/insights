@@ -124,6 +124,9 @@ CI で落ちたときの直し方は検査によって違う。`doc sync` は PR
   実装**を使う。テストはすべてこの方針で書かれている
 - どうしても実行が必要な場合は、対象を `--limit` で絞り、`--yes` を付けずに推定コストを確認してから実行する
 - `claude -p` を呼ぶコードには必ず `--max-budget-usd` を渡す（1 回の暴走で枠を使い切らないため）
+- **`codex exec` には支出上限のフラグが無い。** 歯止めはタイムアウトだけなので、`codex exec` を
+  呼ぶコードには必ず `context.WithTimeout` を掛ける（`internal/judge/codexcli`）。上限を渡せない
+  ぶん、既定のタイムアウトを安易に伸ばさないこと
 
 ## プロンプトを変更したとき
 
@@ -132,6 +135,17 @@ CI で落ちたときの直し方は検査によって違う。`doc sync` は PR
 
 - セッション評価: `internal/judge/prompts/prompts.go`
 - 日報・振り返り: `internal/rollup/synth.go`
+
+## ログソースを触るとき
+
+対応エージェントは Claude Code と Codex で、違いは `internal/source/*` に閉じ込めてある。
+
+- **Codex のロールアウト形式は公開仕様として文書化されていない。** 直すときは推測せず
+  [openai/codex](https://github.com/openai/codex) のソース（`codex-rs/rollout`・`codex-rs/protocol`）を
+  読んで合わせること。何をどう対応付けたかは `internal/source/codex/parse.go` のコメントにある
+- **`internal/cli` のテストで設定を作るときは `isolateCodexSource` を呼ぶ。** codex ソースは既定で
+  有効かつ root 空で `$CODEX_HOME`（無ければ `~/.codex`）に解決されるため、これを忘れると
+  テストがその環境の実ログを読み、実行する人によって結果が変わる
 
 ## 改行コード
 

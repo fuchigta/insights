@@ -21,6 +21,7 @@ import (
 	"github.com/fuchigta/insights/internal/pricing"
 	"github.com/fuchigta/insights/internal/source"
 	"github.com/fuchigta/insights/internal/source/claudecode"
+	"github.com/fuchigta/insights/internal/source/codex"
 	"github.com/fuchigta/insights/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -184,7 +185,7 @@ func runIngest(cmd *cobra.Command, cfg *config.Config, opts ingestOptions) error
 //
 // 処理の流れ:
 //  1. DB を開き、増分取り込みの基準時刻（--since/--all/前回取り込み以降）を決める
-//  2. 有効なソース（現状 claude-code のみ）で Discover する
+//  2. 有効なソース（claude-code / codex）で Discover する
 //  3. 発見した Ref を並行にパースし（NeedsIngest で不要な分は事前にスキップ）、
 //     結果をチャネル経由で 1 つの goroutine（このループ自身）に集約する。
 //     チャネルからの到着順は並行実行のため不定になり得るが、Discover 順（index）で
@@ -229,9 +230,13 @@ func ingestRun(cmd *cobra.Command, cfg *config.Config, opts ingestOptions) (*ing
 		return nil, err
 	}
 
-	sources, err := buildSources(cfg)
+	sources, skippedSources, err := buildSources(cfg)
 	if err != nil {
 		return nil, err
+	}
+	for _, s := range skippedSources {
+		// 「取り込み対象が 0 件」の理由が分からないと利用者は設定を疑いようがない。
+		fmt.Fprintf(cmd.ErrOrStderr(), "insights ingest: ログ置き場が見つからないソースを飛ばしました: %s\n", s)
 	}
 	refs, err := discoverRefs(sources, since)
 	if err != nil {
@@ -444,17 +449,46 @@ func resolveSince(db *store.DB, opts ingestOptions) (since time.Time, mode, labe
 }
 
 // buildSources は cfg で有効なソースを名前引きできる形で組み立てる。
-func buildSources(cfg *config.Config) (map[string]source.Source, error) {
-	out := map[string]source.Source{}
+// 第 2 戻り値は「設定では有効だが、ログ置き場が無くて飛ばしたソース」の説明。
+//
+// ログ置き場の有無をここで見るのは、対応エージェントが複数あるためである。
+// Claude Code しか使っていない環境でも codex は既定で有効なので、置き場が無い
+// ソースで全体を失敗させると、ほとんどの利用者が ingest できなくなる。
+// 逆に「全部見つからない」なら設定か環境がおかしいので、そのときだけ失敗させる。
+func buildSources(cfg *config.Config) (map[string]source.Source, []string, error) {
+	var candidates []source.Source
+
 	if cfg.Sources.ClaudeCode.Enabled {
 		root, err := config.ExpandPath(cfg.Sources.ClaudeCode.Root)
 		if err != nil {
-			return nil, fmt.Errorf("claude-code のログ置き場パスの解決に失敗しました: %w", err)
+			return nil, nil, fmt.Errorf("claude-code のログ置き場パスの解決に失敗しました: %w", err)
 		}
-		s := claudecode.New(root)
+		candidates = append(candidates, claudecode.New(root))
+	}
+	if cfg.Sources.Codex.Enabled {
+		root, err := config.ExpandPath(cfg.Sources.Codex.Root)
+		if err != nil {
+			return nil, nil, fmt.Errorf("codex のログ置き場パスの解決に失敗しました: %w", err)
+		}
+		candidates = append(candidates, codex.New(root))
+	}
+	if len(candidates) == 0 {
+		return nil, nil, fmt.Errorf("有効なログソースがありません（sources.* がすべて無効です）")
+	}
+
+	out := map[string]source.Source{}
+	var skipped []string
+	for _, s := range candidates {
+		if err := s.Available(); err != nil {
+			skipped = append(skipped, fmt.Sprintf("%s (%v)", s.Name(), err))
+			continue
+		}
 		out[s.Name()] = s
 	}
-	return out, nil
+	if len(out) == 0 {
+		return nil, nil, fmt.Errorf("有効なログソースのログ置き場がどれも見つかりません: %s", strings.Join(skipped, ", "))
+	}
+	return out, skipped, nil
 }
 
 // discoverRefs は sources 全てを since 以降で Discover し、結果を結合する。

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fuchigta/insights/internal/config"
 	"github.com/fuchigta/insights/internal/model"
 	"github.com/fuchigta/insights/internal/store"
 )
@@ -131,4 +132,14 @@ func validRetroJSON() json.RawMessage {
 		"verifications": [],
 		"outliers": []
 	}`)
+}
+
+// isolateCodexSource は codex ソースのルートを空の一時ディレクトリに固定する。
+//
+// codex ソースは既定で有効で、root が空だと $CODEX_HOME（無ければ ~/.codex）に
+// 解決される。テストでこれを放置すると、テストを走らせた人の実際の Codex ログを
+// 読み込んでしまい、結果が実行環境によって変わる。
+func isolateCodexSource(t *testing.T, cfg *config.Config) {
+	t.Helper()
+	cfg.Sources.Codex.Root = filepath.Join(t.TempDir(), "codex-home")
 }

@@ -2,23 +2,67 @@
 
 # 設計と拡張点
 
-現時点で対応しているコーディングエージェントは Claude Code のみですが、**将来 Codex などに対応できる
-よう、3 つの拡張点が用意されています。**
+対応しているコーディングエージェントは Claude Code と Codex です。**エージェントごとの違いは
+3 つの拡張点に閉じ込めてあり**、それ以外（取り込み・集計・レポート）はどちらのソースでも同じ
+コードを通ります。
 
 - `internal/source` の `Source` インターフェース — ログソースの発見（`Discover`）とパース（`Parse`）を
-  抽象化しています。
+  抽象化しています。実装は `internal/source/claudecode` と `internal/source/codex`。
 - `internal/judge` の `Judge` インターフェース — AI 評価バックエンドを抽象化しています。プロンプトと
-  JSON Schema を渡して JSON を受け取るだけの契約です。`claude-cli` 実装（`internal/judge/claudecli`）は
-  `claude -p --output-format json` に `--json-schema` を渡し、claude 側で検証済みの構造化出力を
-  `structured_output` フィールドからそのまま受け取ります。これにより、モデルが説明文やコードフェンスを
-  混ぜて返してもパースが壊れません（評価モデルが Markdown 混じりの応答を返す逸脱が実際に観測されたため
-  導入しました）。`structured_output` が無い古い経路では、応答本文からの JSON 抽出にフォールバックします。
+  JSON Schema を渡して JSON を受け取るだけの契約です。実装は `internal/judge/claudecli` と
+  `internal/judge/codexcli`。実行メタ情報（コスト・実行セッション ID）を返せるバックエンドは、
+  任意実装の `judge.Runner` も満たします。
 - `internal/skill` の `Installer` インターフェース — スキルの配布先を抽象化しています。各エージェント
   向けの実装パッケージが自身の `init()` で自己登録する方式（`database/sql.Register` と同様）を採っており、
-  レジストリ側（`internal/skill/registry.go`）は具象実装を一切 import しません。
+  レジストリ側（`internal/skill/registry.go`）は具象実装を一切 import しません。配置の手順そのもの
+  （改変検出・アトミックな書き込み・後始末）は `internal/skill/skillfile.go` に集約し、各実装は
+  「どこに置くか」だけを持ちます。
 
-**Codex 対応は現時点では実装されていません。** 上記 3 つのインターフェースを満たす実装パッケージ
-（`internal/source/codex` など）を追加すれば差し込める設計になっている、という段階です。
+## 評価バックエンドごとの違い
+
+どちらも「プロンプトと JSON Schema を渡して JSON を受け取る」契約は同じですが、CLI 側の
+作りが違うため渡し方が変わります。利用者向けの説明は
+[docs/configuration.md](configuration.md) と [docs/cost.md](cost.md) にあります。
+
+| | `claude-cli` | `codex-cli` |
+|---|---|---|
+| コマンド | `claude -p --output-format json` | `codex exec --json` |
+| スキーマ | `--json-schema`（JSON を argv で直接） | `--output-schema`（スキーマ**ファイル**のパス） |
+| 応答の取り出し | `structured_output` フィールド（claude 側で検証済み） | イベント列の最後の `agent_message` |
+| 役割指示 | `--system-prompt-file` | 相当するフラグが無く、本文の先頭に連結 |
+| 支出上限 | `--max-budget-usd` | 無し（タイムアウトと件数だけ） |
+| 実費の報告 | `total_cost_usd` | 無し（`RunInfo.CostUSD` は 0 のまま） |
+
+`claude-cli` が `--json-schema` を使うのは、モデルが説明文やコードフェンスを混ぜて返しても
+パースが壊れないようにするためです（評価モデルが Markdown 混じりの応答を返す逸脱が実際に
+観測されたため導入しました）。`structured_output` が無い古い経路では、応答本文からの JSON 抽出に
+フォールバックします。`codex-cli` は構造化出力でも本文が文字列として返るため、常に抽出を通します。
+抽出・必須フィールド検証・レート制限らしさの判定は、バックエンド間でずれないよう
+`internal/judge` に共通実装として置いています。
+
+## ログソースごとの違い
+
+正規化モデル（`internal/model`）に落とすまでに吸収している差です。**新しいソースを足すときは、
+同じ表を埋められるかを先に確かめてください。**
+
+| | Claude Code | Codex |
+|---|---|---|
+| 置き場 | `~/.claude/projects/<slug>/<uuid>.jsonl` | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl` |
+| 圧縮 | なし | 7 日ほどで `.jsonl.zst`（zstd）。両方読む |
+| 保持 | 約30日で自動削除 | 自動削除なし |
+| サブエージェント | `<uuid>/subagents/agent-*.jsonl`（親はパスから復元） | 同じ置き場に並ぶ。親は `session_meta` の `parent_thread_id` |
+| モデル名 | アシスタント発話ごとに入る | 発話には無い。`turn_context` 行を追いかける |
+| トークン使用量 | アシスタント発話の `usage`（`message.id` で重複排除） | 別行の `token_usage_record`。直近のアシスタント発話に対応付ける |
+| 入力トークンの意味 | キャッシュ読み取りを含まない | **含む**（取り込み時に差し引く） |
+| ツールのエラー | `is_error` で分かる | ワイヤに出ないため分からない（`tool_error_count` は 0 のまま） |
+| 非対話の入口 | `sdk-cli` | `exec` / `mcp` |
+
+Codex 側のロールアウトの構造は公開仕様として文書化されていないため、実装は
+[openai/codex](https://github.com/openai/codex) のソース（`codex-rs/rollout`・`codex-rs/protocol`）を
+読んで合わせています。**ここを直すときも、推測ではなく向こうのソースを確認してください。**
+本実装が対応している行の種類（`session_meta` / `turn_context` / `response_item` /
+`token_usage_record` / `compacted`）と、意図的に無視しているもの（`event_msg` ほか）の理由は
+`internal/source/codex/parse.go` のコメントにあります。
 
 ## CI
 
@@ -58,8 +102,10 @@ CI での見方は検査によって違います。**この違いは意図的で
   （`git rebase -i` などでやり直して force push）です。main は force push を禁止して
   いますが、作業ブランチにはこの制限はありません
 
-`claude` CLI は CI ランナーに無いため、AI を実際に呼ぶテストはスキップされ、CI 実行自体で課金が
-発生することはありません。
+`claude` / `codex` CLI は CI ランナーに無いため、AI を実際に呼ぶテストはスキップされ、CI 実行自体で
+課金が発生することはありません。評価バックエンドの引数の組み立てだけは、**go test バイナリ自身を
+偽の `claude` / `codex` として起動し直す**方法で検証しています（各バックエンドのテストの `TestMain`）。
+実プロセスを起こすので、Windows でのコマンドライン組み立ての壊れ方まで拾えます。
 
 テストはパッケージ単位のものに加えて、**コマンド層を通した統合テスト**（`internal/cli`）があります。
 一時ディレクトリに作った偽の `~/.claude` ツリーを入力に、`ingest` → `judge` → `daily` → `report` →
@@ -67,6 +113,11 @@ CI での見方は検査によって違います。**この違いは意図的で
 親への畳み込み、丸めの結果が描画に反映されること、フロントマターからの再集計）を検証します。
 これまで見つかった不具合はほぼすべて継ぎ目にあったためです。評価バックエンドは
 `internal/cli/deps.go` の `newJudge` を差し替えてフェイクにするので、`claude` は呼ばれません。
+
+**`internal/cli` のテストで設定を組み立てるときは、`sources.codex.root` を一時ディレクトリに
+固定してください**（ヘルパ `isolateCodexSource`）。codex ソースは既定で有効で、root が空だと
+実行時に `$CODEX_HOME`（無ければ `~/.codex`）へ解決されるため、放置するとテストを走らせた人の
+実際の Codex ログを読み込んでしまい、結果が実行環境によって変わります。
 
 ## GitHub 側で有効にしているもの
 
@@ -100,8 +151,15 @@ Dependabot が出す Actions の更新 PR（`uses:` のバージョン変更）�
   おり（`session_evals` テーブル、冪等キーは `(session_id, prompt_version)`）、評価プロンプトを更新した
   ときは再評価できます。トランスクリプトの情報が乏しいセッションでは、無理に断定せず低い `confidence`
   が返るのが正しい振る舞いです。
-- **取りこぼした過去ログは復元できません。** 約30日で削除される前に取り込めなかったセッションは、
-  二度と評価対象にできません。
+- **取りこぼした Claude Code の過去ログは復元できません。** 約30日で削除される前に取り込めなかった
+  セッションは、二度と評価対象にできません（Codex のログには自動削除が無く、後から取り込めます）。
+- **レポートはログソースを区別しません。** Claude Code と Codex のセッションは同じ DB に入り、
+  同じ日報・振り返りにまとめて集計されます（`sessions.source` 列には識別子が入っていますが、
+  集計軸としては使っていません）。「エージェント別に比べたい」は今のところできません。
+- **Codex のツール実行が成功したか失敗したかは分かりません。** ロールアウトのツール結果には
+  成功可否がワイヤ上に出ないため（Codex 側の `FunctionCallOutputPayload.success` は
+  シリアライズされない）、`tool_error_count` は Codex のセッションでは常に 0 になります。
+  推測で埋めると「ツールエラー数」が実態と無関係な数字になるため、埋めていません。
 - **セッション当時のブランチが消えていると、コミットの絞り込みが粗くなります。** 作業ブランチは
   PR/MR のマージと同時に削除されることが多いため、`<branch>` → `origin/<branch>` → 全 ref（`--all`）
   の順にフォールバックしてコミットを探します。最後まで落ちた場合は同じ時間帯の他ブランチの

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/fuchigta/insights/internal/config"
+	"github.com/fuchigta/insights/internal/source/codex"
 	"github.com/spf13/cobra"
 )
 
@@ -27,6 +28,7 @@ type doctorResult struct {
 	ValidationErrors []string            `json:"validation_errors"`
 	Tools            []toolCheck         `json:"tools"`
 	ClaudeCodeLogs   claudeCodeLogsCheck `json:"claude_code_logs"`
+	CodexLogs        codexLogsCheck      `json:"codex_logs"`
 	Output           writeCheck          `json:"output"`
 	Database         writeCheck          `json:"database"`
 }
@@ -52,6 +54,22 @@ type claudeCodeLogsCheck struct {
 	Error         string `json:"error,omitempty"`
 }
 
+// codexLogsCheck は Codex のロールアウトログの状態。
+//
+// Claude Code と違い、Codex のログには自動削除が無い（7 日以上経つと zstd に
+// 圧縮されるだけ）。そのため「最古のログが古い」ことは警告にならず、代わりに
+// 圧縮済みの件数を出して、読めている（＝圧縮版も取り込める）ことを示す。
+type codexLogsCheck struct {
+	Enabled         bool   `json:"enabled"`
+	Root            string `json:"root,omitempty"`
+	SessionsDir     string `json:"sessions_dir,omitempty"`
+	SessionsFound   bool   `json:"sessions_dir_found"`
+	RolloutCount    int    `json:"rollout_count"`
+	CompressedCount int    `json:"compressed_count"`
+	NewestFile      string `json:"newest_file,omitempty"` // RFC3339
+	Error           string `json:"error,omitempty"`
+}
+
 // writeCheck は出力先ディレクトリ／DBパスの書き込み可否。
 type writeCheck struct {
 	Path     string `json:"path"`
@@ -64,8 +82,9 @@ func newConfigDoctorCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "設定・外部コマンド・ログの状態を診断する",
-		Long: "設定ファイルの妥当性、claude/git/gh/glab の疎通、Claude Code ログの取りこぼしリスク、\n" +
-			"出力先の書き込み可否をまとめて確認する。致命的な設定エラーがない限り終了コードは 0。",
+		Long: "設定ファイルの妥当性、claude/codex/git/gh/glab の疎通、Claude Code ログの取りこぼしリスク、\n" +
+			"Codex ログの検出状況、出力先の書き込み可否をまとめて確認する。\n" +
+			"致命的な設定エラーがない限り終了コードは 0。",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := ConfigFromContext(cmd)
 			if err != nil {
@@ -88,6 +107,7 @@ func newConfigDoctorCommand() *cobra.Command {
 
 			result.Tools = checkTools()
 			result.ClaudeCodeLogs = checkClaudeCodeLogs(cfg)
+			result.CodexLogs = checkCodexLogs(cfg)
 			result.Output = checkWritable(cfg.Output.Dir, true)
 			result.Database = checkWritable(cfg.Database, false)
 			result.OK = len(result.ValidationErrors) == 0
@@ -107,7 +127,7 @@ func newConfigDoctorCommand() *cobra.Command {
 	return cmd
 }
 
-// checkTools は claude/git/gh/glab の有無を exec.LookPath で確認する。
+// checkTools は claude/git/gh/glab/codex の有無を exec.LookPath で確認する。
 // 見つからなくてもエラーにはせず、結果に「見つからない」旨を記録するだけ。
 func checkTools() []toolCheck {
 	candidates := []struct {
@@ -118,6 +138,7 @@ func checkTools() []toolCheck {
 		{"git", true},
 		{"gh", false},
 		{"glab", false},
+		{"codex", false},
 	}
 
 	results := make([]toolCheck, 0, len(candidates))
@@ -187,6 +208,56 @@ func checkClaudeCodeLogs(cfg *config.Config) claudeCodeLogsCheck {
 		if age > staleLogThreshold {
 			result.StaleWarning = true
 		}
+	}
+	return result
+}
+
+// checkCodexLogs は sources.codex.root 配下の sessions/**/rollout-*.jsonl[.zst] を数える。
+//
+// 走査対象のパスは source/codex 側に決めさせる（root が空のときの $CODEX_HOME →
+// ~/.codex という解決も含む）。ここでパスを組み直すと、取り込みが実際に見る場所と
+// 診断が見る場所がずれて、診断が嘘をつくようになる。
+func checkCodexLogs(cfg *config.Config) codexLogsCheck {
+	result := codexLogsCheck{Enabled: cfg.Sources.Codex.Enabled}
+	if !result.Enabled {
+		return result
+	}
+
+	root, err := config.ExpandPath(cfg.Sources.Codex.Root)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+
+	src := codex.New(root)
+	result.Root = src.Root
+	result.SessionsDir = src.SessionsDir()
+
+	info, statErr := os.Stat(result.SessionsDir)
+	if statErr != nil || !info.IsDir() {
+		result.SessionsFound = false
+		return result
+	}
+	result.SessionsFound = true
+
+	refs, discoverErr := src.Discover(time.Time{})
+	if discoverErr != nil {
+		result.Error = discoverErr.Error()
+		return result
+	}
+
+	var newest time.Time
+	for _, ref := range refs {
+		result.RolloutCount++
+		if strings.HasSuffix(ref.Path, ".jsonl.zst") {
+			result.CompressedCount++
+		}
+		if ref.ModTime.After(newest) {
+			newest = ref.ModTime
+		}
+	}
+	if !newest.IsZero() {
+		result.NewestFile = newest.Format(time.RFC3339)
 	}
 	return result
 }
@@ -298,6 +369,24 @@ func renderDoctorHuman(w io.Writer, r doctorResult) error {
 		if lc.StaleWarning {
 			fmt.Fprintln(w, "  警告: 最古のログが25日以上前です。Claude Code のログは約30日で自動削除されるため、")
 			fmt.Fprintln(w, "        取りこぼす前に `insights ingest` を実行してください。")
+		}
+	}
+	fmt.Fprintln(w)
+
+	fmt.Fprintln(w, "Codex ログ:")
+	cx := r.CodexLogs
+	switch {
+	case !cx.Enabled:
+		fmt.Fprintln(w, "  sources.codex は無効化されています")
+	case cx.Error != "":
+		fmt.Fprintf(w, "  エラー: %s\n", cx.Error)
+	case !cx.SessionsFound:
+		fmt.Fprintf(w, "  sessions ディレクトリが見つかりません: %s（Codex を使っていなければ問題ありません）\n", cx.SessionsDir)
+	default:
+		fmt.Fprintf(w, "  sessions ディレクトリ: %s\n", cx.SessionsDir)
+		fmt.Fprintf(w, "  ロールアウト件数: %d（うち圧縮済み %d）\n", cx.RolloutCount, cx.CompressedCount)
+		if cx.NewestFile != "" {
+			fmt.Fprintf(w, "  最新のファイル: %s\n", cx.NewestFile)
 		}
 	}
 	fmt.Fprintln(w)

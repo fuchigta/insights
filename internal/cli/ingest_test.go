@@ -130,6 +130,7 @@ func writeTestConfig(t *testing.T, configPath, fakeHome, excludedProject string)
 	t.Helper()
 	cfg := config.Default()
 	cfg.Sources.ClaudeCode.Root = fakeHome
+	isolateCodexSource(t, cfg)
 	cfg.Evidence.Git = false
 	cfg.Evidence.Gh = config.TristateFalse
 	cfg.Evidence.Glab = config.TristateFalse
@@ -334,5 +335,195 @@ func TestIngest_JSONOutput(t *testing.T) {
 	// --json 指定時は標準出力が JSON のみであること（進捗ログ等が混ざっていない）。
 	if errBuf.Len() == 0 {
 		t.Error("stderr が空: 進捗ログが標準エラーに出ていない可能性がある")
+	}
+}
+
+// writeCodexRollout は Parse を通る最小限の Codex ロールアウトを書き出す。
+func writeCodexRollout(t *testing.T, codexHome, sessionID, cwd string, ts time.Time) {
+	t.Helper()
+
+	dir := filepath.Join(codexHome, "sessions", ts.Format("2006"), ts.Format("01"), ts.Format("02"))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	path := filepath.Join(dir, "rollout-"+ts.Format("2006-01-02T15-04-05")+"-"+sessionID+".jsonl")
+
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("os.Create: %v", err)
+	}
+	defer f.Close()
+
+	writeJSONLine(t, f, map[string]any{
+		"timestamp": ts.Format(time.RFC3339Nano),
+		"type":      "session_meta",
+		"payload": map[string]any{
+			"id":          sessionID,
+			"session_id":  sessionID,
+			"timestamp":   ts.Format(time.RFC3339Nano),
+			"cwd":         cwd,
+			"originator":  "codex_cli_rs",
+			"cli_version": "0.128.0",
+			"source":      "cli",
+			"git":         map[string]any{"branch": "main"},
+		},
+	})
+	writeJSONLine(t, f, map[string]any{
+		"timestamp": ts.Add(time.Second).Format(time.RFC3339Nano),
+		"type":      "turn_context",
+		"payload":   map[string]any{"cwd": cwd, "model": "gpt-5.5", "effort": "high"},
+	})
+	writeJSONLine(t, f, map[string]any{
+		"timestamp": ts.Add(2 * time.Second).Format(time.RFC3339Nano),
+		"type":      "response_item",
+		"payload": map[string]any{
+			"type": "message", "role": "user",
+			"content": []map[string]any{{"type": "input_text", "text": "テストプロンプト"}},
+		},
+	})
+	writeJSONLine(t, f, map[string]any{
+		"timestamp": ts.Add(3 * time.Second).Format(time.RFC3339Nano),
+		"type":      "response_item",
+		"payload": map[string]any{
+			"type": "message", "role": "assistant",
+			"content": []map[string]any{{"type": "output_text", "text": "応答テキスト"}},
+		},
+	})
+	writeJSONLine(t, f, map[string]any{
+		"timestamp": ts.Add(4 * time.Second).Format(time.RFC3339Nano),
+		"type":      "token_usage_record",
+		"payload": map[string]any{
+			"usage": map[string]any{
+				"input_tokens": 100, "cached_input_tokens": 10,
+				"cache_write_input_tokens": 5, "output_tokens": 50,
+				"reasoning_output_tokens": 20,
+			},
+		},
+	})
+}
+
+// TestIngest_CodexSource は Codex のロールアウトがコマンド層を通して取り込まれ、
+// Claude Code のセッションと同じ DB に並ぶことを確かめる。
+// パッケージ単体では通っても、設定の解釈やソースの組み立てという継ぎ目で
+// 落ちることが多いため、ここはコマンドを実際に走らせて見る。
+func TestIngest_CodexSource(t *testing.T) {
+	tmp := t.TempDir()
+	fakeClaudeHome := filepath.Join(tmp, "claude")
+	fakeCodexHome := filepath.Join(tmp, "codex")
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+	proj := filepath.Join(tmp, "proj-a")
+
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	writeValidSession(t, filepath.Join(fakeClaudeHome, "projects", "proj-a-slug", "11111111-1111-1111-1111-111111111111.jsonl"),
+		"11111111-1111-1111-1111-111111111111", proj, base)
+	writeCodexRollout(t, fakeCodexHome, "99999999-9999-9999-9999-999999999999", proj, base.Add(time.Hour))
+
+	cfg := config.Default()
+	cfg.Sources.ClaudeCode.Root = fakeClaudeHome
+	cfg.Sources.Codex.Root = fakeCodexHome
+	cfg.Evidence.Git = false
+	cfg.Evidence.Gh = config.TristateFalse
+	cfg.Evidence.Glab = config.TristateFalse
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("cfg.Save: %v", err)
+	}
+
+	stdout, stderr, err := runIngestCLI(t, configPath, dbPath, "--all", "--no-evidence")
+	if err != nil {
+		t.Fatalf("ingest error = %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	}
+
+	ids := allSessionIDs(t, dbPath)
+	if len(ids) != 2 {
+		t.Fatalf("取り込まれたセッション数 = %d, want 2（claude-code と codex が 1 件ずつ）: %v", len(ids), ids)
+	}
+
+	d, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer d.Close()
+
+	rows, err := d.SessionsInRange(time.Time{}, time.Date(2999, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("SessionsInRange: %v", err)
+	}
+	var codexRow *store.SessionRow
+	for i := range rows {
+		if rows[i].Source == "codex" {
+			codexRow = &rows[i]
+		}
+	}
+	if codexRow == nil {
+		t.Fatalf("source=codex のセッションが DB にありません: %+v", rows)
+	}
+	if codexRow.SessionID != "99999999-9999-9999-9999-999999999999" {
+		t.Errorf("SessionID = %q", codexRow.SessionID)
+	}
+	if codexRow.ProjectPath != proj {
+		t.Errorf("ProjectPath = %q, want %q", codexRow.ProjectPath, proj)
+	}
+	if codexRow.FirstPrompt != "テストプロンプト" {
+		t.Errorf("FirstPrompt = %q", codexRow.FirstPrompt)
+	}
+}
+
+// TestIngest_MissingCodexRootIsSkipped は、Codex を使っていない環境（sessions/ が無い）
+// でも ingest が成功することを確かめる。codex ソースは既定で有効なので、ここで
+// 失敗すると Claude Code しか使っていない利用者が ingest できなくなる。
+func TestIngest_MissingCodexRootIsSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	fakeClaudeHome := filepath.Join(tmp, "claude")
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+	proj := filepath.Join(tmp, "proj-a")
+
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	writeValidSession(t, filepath.Join(fakeClaudeHome, "projects", "proj-a-slug", "11111111-1111-1111-1111-111111111111.jsonl"),
+		"11111111-1111-1111-1111-111111111111", proj, base)
+
+	cfg := config.Default()
+	cfg.Sources.ClaudeCode.Root = fakeClaudeHome
+	cfg.Sources.Codex.Root = filepath.Join(tmp, "no-such-codex-home")
+	cfg.Evidence.Git = false
+	cfg.Evidence.Gh = config.TristateFalse
+	cfg.Evidence.Glab = config.TristateFalse
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("cfg.Save: %v", err)
+	}
+
+	stdout, stderr, err := runIngestCLI(t, configPath, dbPath, "--all", "--no-evidence")
+	if err != nil {
+		t.Fatalf("ingest error = %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "ログ置き場が見つからないソースを飛ばしました") {
+		t.Errorf("飛ばしたソースの説明が stderr にありません:\n%s", stderr)
+	}
+	if ids := allSessionIDs(t, dbPath); len(ids) != 1 {
+		t.Fatalf("取り込まれたセッション数 = %d, want 1: %v", len(ids), ids)
+	}
+}
+
+// TestIngest_AllSourcesMissingIsError は、有効なソースのログ置き場がどれも
+// 見つからないときはエラーにすることを確かめる。全部飛ばして「0 件取り込みました」で
+// 成功すると、設定ミスに気付けない。
+func TestIngest_AllSourcesMissingIsError(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+
+	cfg := config.Default()
+	cfg.Sources.ClaudeCode.Root = filepath.Join(tmp, "no-such-claude-home")
+	cfg.Sources.Codex.Root = filepath.Join(tmp, "no-such-codex-home")
+	cfg.Evidence.Git = false
+	cfg.Evidence.Gh = config.TristateFalse
+	cfg.Evidence.Glab = config.TristateFalse
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("cfg.Save: %v", err)
+	}
+
+	if _, _, err := runIngestCLI(t, configPath, dbPath, "--all", "--no-evidence"); err == nil {
+		t.Fatal("ingest = nil, want error（ログ置き場がどれも無い）")
 	}
 }

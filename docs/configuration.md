@@ -10,6 +10,9 @@ sources:
   claude-code:
     root: ~/.claude
     enabled: true
+  codex:
+    root: ""
+    enabled: true
 judge:
   backend: claude-cli
   model: claude-sonnet-5
@@ -44,10 +47,12 @@ pricing:
 | `language` | レポート生成に使う言語コード | `ja` |
 | `sources.claude-code.root` | Claude Code のログ置き場（`projects/` サブディレクトリを見る） | `~/.claude` |
 | `sources.claude-code.enabled` | Claude Code ソースの有効/無効 | `true` |
-| `judge.backend` | AI 評価バックエンド識別子（現状 `claude-cli` のみ対応） | `claude-cli` |
-| `judge.model` | 評価に使うモデル | `claude-sonnet-5` |
+| `sources.codex.root` | Codex のログ置き場（`sessions/` と `archived_sessions/` を見る）。**空にしておくと環境変数 `CODEX_HOME`、無ければ `~/.codex` を実行時に解決する** | `""`（自動判定） |
+| `sources.codex.enabled` | Codex ソースの有効/無効 | `true` |
+| `judge.backend` | AI 評価バックエンド識別子（`claude-cli` / `codex-cli`） | `claude-cli` |
+| `judge.model` | 評価に使うモデル。バックエンドに合わせて書く（`codex-cli` なら `gpt-5.5` など） | `claude-sonnet-5` |
 | `judge.concurrency` | 評価の並列実行数 | `3` |
-| `judge.timeout` | `claude` 1 回の実行タイムアウト | `3m0s`（180秒） |
+| `judge.timeout` | 評価バックエンド 1 回の実行タイムアウト | `3m0s`（180秒） |
 | `evidence.git` | git commit 収集の有効/無効 | `true` |
 | `evidence.gh` | `gh`（GitHub CLI）による PR/Issue 収集。`true`/`false`/`auto`（見つかれば使う） | `auto` |
 | `evidence.glab` | `glab`（GitLab CLI）による MR/Issue 収集。同上 | `auto` |
@@ -63,6 +68,28 @@ pricing:
 | `goals.global` | レポート全体で重視する価値の説明文。評価プロンプトに渡り、判定の物差しになる | `""` |
 | `goals.projects` | プロジェクトパスごとの重視する価値。一致すれば `goals.global` より優先される | `{}` |
 | `pricing.overrides` | モデルごとの単価上書き（`input` / `output` / `cache_write_5m` / `cache_write_1h` / `cache_read`、単位は 1M トークンあたり USD） | `{}` |
+
+## ログソース（Claude Code / Codex）
+
+有効なソースは取り込み時にまとめて走査されます。**ログ置き場が見つからないソースは黙って
+飛ばし**（stderr にその旨を出す）、**すべてのソースで見つからないときだけエラー**にします。
+Codex ソースは既定で有効なので、Claude Code しか使っていなくても `insights ingest` は
+そのまま動きます。逆に「全部見つからない」は設定ミスの可能性が高いので止めます。
+
+いま何が見えているかは `insights config doctor` が表示します（`sessions` ディレクトリの
+場所、ロールアウト件数、そのうち圧縮済みの件数）。
+
+Codex 固有の注意:
+
+- **ロールアウトは書き終えて 7 日ほど経つと Codex 自身が zstd（`.jsonl.zst`）に圧縮します。**
+  insights は圧縮版もそのまま読むので、取り込みが途切れることはありません
+- **Codex のログには自動削除がありません。** Claude Code（約30日）と違い、`ingest --all` で
+  後からまとめて取り込めます
+- アーカイブしたスレッド（`archived_sessions/`）も取り込みます。片付けただけで、実際に
+  行われた作業であることは変わらないためです
+- `codex exec` / MCP 経由のセッションは**非対話**として扱います（人が同席せず、実行中に
+  軌道修正も検収もできないため）。集計の「対話/自動」の内訳と、評価軸の読み替えに効きます
+- サブエージェント・Codex 内部のスレッドは親セッションに畳み込まれ、個別評価の対象外になります
 
 ## 除外するパスの書き方
 
@@ -137,19 +164,51 @@ goals:
 比較は `~` 展開とパス正規化を行った上での完全一致で、Windows のパス区切り・大文字小文字の違いは
 吸収されます。
 
+## 評価バックエンドを切り替える
+
+`judge.backend` で AI 評価をどのエージェントに任せるかを選べます。
+
+```yaml
+judge:
+  backend: codex-cli
+  model: gpt-5.5
+```
+
+| バックエンド | 呼ぶコマンド | 構造化出力の渡し方 | 実費の報告 |
+|---|---|---|---|
+| `claude-cli`（既定） | `claude -p --output-format json` | `--json-schema`（JSON を直接） | あり（`total_cost_usd`） |
+| `codex-cli` | `codex exec --json` | `--output-schema`（スキーマ**ファイル**のパス） | なし |
+
+`codex-cli` を選ぶときに知っておくべき差:
+
+- **1 回あたりの支出上限を渡せません。** `claude -p` の `--max-budget-usd` に相当する
+  フラグが `codex exec` には無いため、暴走の歯止めは `judge.timeout` と `--limit` だけです
+- **実費（USD）を報告しません。** そのため事前確認では金額を出さず、「見積もれない」と
+  表示します（$0 という意味ではありません）。詳細は [docs/cost.md](cost.md)
+- 評価は `--sandbox read-only --ephemeral` で実行します。読み取りだけに限定し、評価の実行
+  自体がセッションログとして残らない（次回の取り込みで自分の統計を汚さない）ようにするためです
+- 役割指示（system prompt 相当）を別枠で渡せないため、プロンプト本文の先頭に連結します
+
 ## 他のコーディングエージェントから使う
 
 ```bash
-insights skill install --scope user
+insights skill install --scope user                 # Claude Code（既定）
+insights skill install --agent codex --scope user   # Codex
 ```
 
-を実行すると、Claude Code のスキルとして `insights` の使い方が導入され（既定は
-`~/.claude/skills/insights/SKILL.md`）、Claude Code のセッション内から「今週どこにコストが消えた?」
-「先週の振り返りは?」「改善提案は実行できているか?」のように尋ねると、`insights daily --json` や
-`insights actions list --json` などを叩いて答えてくれるようになります。
+を実行すると、そのエージェントのスキルとして `insights` の使い方が導入され、セッション内から
+「今週どこにコストが消えた?」「先週の振り返りは?」「改善提案は実行できているか?」のように
+尋ねると、`insights daily --json` や `insights actions list --json` などを叩いて答えて
+くれるようになります。
 
-`--scope user`（既定）は `~/.claude/skills/insights/` に、`--scope project` はカレントディレクトリの
-`.claude/skills/insights/` に配置します。プロジェクト固有の運用にしたい場合は `project` を使ってください。
+配置先は `--agent` と `--scope` の組で決まります。
+
+| エージェント | `--scope user` | `--scope project` |
+|---|---|---|
+| `claude-code`（既定） | `~/.claude/skills/insights/` | `./.claude/skills/insights/` |
+| `codex` | `$CODEX_HOME/skills/insights/`（既定 `~/.codex/skills/insights/`） | `./.codex/skills/insights/` |
+
+プロジェクト固有の運用にしたい場合は `project` を使ってください。
 
 `insights skill status` で導入状態（未導入 / 最新 / 旧版 / 手で改変済み）を確認できます。手で SKILL.md を
 編集した状態で `insights skill install` を再実行するとエラーになり、上書きするには `--force` が必要です。

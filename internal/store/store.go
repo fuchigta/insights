@@ -583,7 +583,7 @@ func (d *DB) UnevaluatedSessions(from, to time.Time, promptVersion string) ([]st
 // SessionsInRange は started_at が [from, to] に含まれるセッションを開始時刻順に返す。
 func (d *DB) SessionsInRange(from, to time.Time) ([]SessionRow, error) {
 	rows, err := d.db.Query(`
-		SELECT session_id, project_label, project_path, worktree, started_at, ended_at, is_sidechain,
+		SELECT session_id, source, project_label, project_path, worktree, started_at, ended_at, is_sidechain,
 		       parent_session_id, entrypoint, first_prompt, title, message_count, tool_error_count, content_hash
 		FROM sessions
 		WHERE started_at >= ? AND started_at <= ?
@@ -600,7 +600,7 @@ func (d *DB) SessionsInRange(from, to time.Time) ([]SessionRow, error) {
 		var startedAt, endedAt string
 		var isSidechain int
 		if err := rows.Scan(
-			&r.SessionID, &r.ProjectLabel, &r.ProjectPath, &r.Worktree, &startedAt, &endedAt, &isSidechain,
+			&r.SessionID, &r.Source, &r.ProjectLabel, &r.ProjectPath, &r.Worktree, &startedAt, &endedAt, &isSidechain,
 			&r.ParentSessionID, &r.Entrypoint, &r.FirstPrompt, &r.Title, &r.MessageCount, &r.ToolErrorCount, &r.ContentHash,
 		); err != nil {
 			return nil, fmt.Errorf("sessions 行の読み取りに失敗: %w", err)

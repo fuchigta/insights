@@ -9,7 +9,8 @@
 
 ### ローカル DB（`~/.insights/insights.db`）
 
-`insights ingest` は Claude Code の jsonl を読み、**会話本文をそのまま保存する**。
+`insights ingest` は Claude Code の jsonl と Codex のロールアウトを読み、**会話本文をそのまま
+保存する**（どちらのソースでも扱いは同じ）。
 
 - ユーザー発話・アシスタント応答のテキスト（1 メッセージあたり 2,000 文字で切り詰め）
 - ツールの実行結果テキスト（同じく 2,000 文字で切り詰め）
@@ -18,10 +19,13 @@
 ツール結果も保存されるため、**セッション中にツールが読んだファイルの中身（`.env` を含む）は
 DB に入りうる**。DB はローカルのファイルで、外部には送られない。
 
-### 評価（`claude -p`）
+### 評価（`claude -p` / `codex exec`）
 
-`insights judge` / `daily` / `run` は、1 セッションを台本に整形して `claude -p` に渡す
-（`internal/judge/prompt.go`）。台本に含まれるもの:
+`insights judge` / `daily` / `run` は、1 セッションを台本に整形して評価バックエンドに渡す
+（`internal/judge/prompt.go`）。既定の宛先は Claude 本体（`claude -p`）で、設定の
+`judge.backend` を `codex-cli` にした場合は OpenAI（`codex exec`）になる。**取り込んだ
+セッションがどのエージェントのものかに関係なく、宛先はこの設定だけで決まる**
+（Codex のセッションを Claude が評価することも、その逆もある）。台本に含まれるもの:
 
 | 含まれるもの | 上限 |
 |---|---|
@@ -36,12 +40,25 @@ DB に入りうる**。DB はローカルのファイルで、外部には送ら
 つまり、**ツールが読んだファイルの中身は 500 文字までなら評価にも渡る**。認証情報が
 セッションログに現れていれば、それも渡りうるということ。
 
-評価の実行自体は次の条件で行われる:
+評価の実行自体は次の条件で行われる。
+
+`claude -p`（既定）:
 
 - `--tools ""` でツールを全て無効化する（評価者が新たにファイルを読むことはない）
 - 専用の作業ディレクトリ（`~/.insights/judge-workspace`）で実行する（評価対象プロジェクトの
   `CLAUDE.md` やスキルを読み込ませないため）
 - `--max-budget-usd` で 1 回あたりの支出に上限を掛ける
+
+`codex exec`（`judge.backend: codex-cli` のとき）:
+
+- `--sandbox read-only` で書き込みを封じる（`codex exec` にはツールを全て無効化するフラグが
+  無いため、「読むだけ」に限定する形になる）
+- 同じ専用の作業ディレクトリで実行する（評価対象プロジェクトの `AGENTS.md` や
+  `<project>/.codex` を読み込ませないため）。ただし `$CODEX_HOME/AGENTS.md` のような
+  ユーザー全体の指示は読み込まれる
+- `--ephemeral` でセッションファイルを残さない（評価の実行自体が次回の取り込み対象に
+  ならないようにするため）
+- **支出上限は掛けられない**（`codex exec` に相当するフラグが無い。[docs/cost.md](cost.md)）
 
 ### レポート（`~/.insights/reports/`）
 
@@ -54,8 +71,14 @@ DB に入りうる**。DB はローカルのファイルで、外部には送ら
 
 ## なぜマスキングしていないか
 
-送信先は Claude 本体であり、**Claude Code 自身と同じ信頼境界**にある。評価対象のセッションは
+既定の送信先は Claude 本体であり、**Claude Code 自身と同じ信頼境界**にある。評価対象のセッションは
 すでに同じ宛先に送られた会話そのものなので、評価で渡すことによる追加のリスクは実質的に小さい。
+
+**ただし、この前提はバックエンドとログソースの組み合わせで崩れる。** `judge.backend` を
+`codex-cli` にすると Claude Code のセッション本文が OpenAI へ、既定のままなら Codex の
+セッション本文が Anthropic へ渡る。どちらも「元のセッションが送られた先とは別の事業者」に
+なるので、その前提で許容できるかを判断すること。避けたい場合は、評価に回したくないソースを
+`sources.*.enabled: false` で取り込みから外すか、`exclude.projects` で対象を絞る。
 
 一方でマスキングには副作用がある。既知のパターン（API キー、`Authorization` ヘッダ、`.env`
 形式の行など）を機械的に伏せると、誤検出のぶんだけ評価の材料が削れる。マスクされた箇所が多い
@@ -69,9 +92,11 @@ DB に入りうる**。DB はローカルのファイルで、外部には送ら
 - **プロジェクト単位で評価対象から外す。** 設定の `exclude.projects` にパスを書くと、その
   プロジェクトのセッションは評価にも集計にも入らない（[docs/configuration.md](configuration.md)）。
 - **entrypoint 単位で外す。** `exclude.entrypoints` で `sdk` などを除外できる。
+- **ログソース単位で外す。** `sources.claude-code.enabled` / `sources.codex.enabled` を
+  `false` にすると、そのエージェントのセッションは取り込まれない。
 - **DB を消す。** `~/.insights/insights.db` を削除すれば、取り込んだ本文は残らない。ただし
   Claude Code のログは約 30 日で自動削除されるため、消したセッションは復元できない
-  （[docs/scheduling.md](scheduling.md)）。
+  （[docs/scheduling.md](scheduling.md)）。Codex のログに自動削除は無いので、取り込み直せる。
 
 ## この判断を変えるとしたら
 

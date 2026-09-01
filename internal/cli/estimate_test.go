@@ -51,7 +51,7 @@ func TestPercentileOf(t *testing.T) {
 func TestEvalCostEstimator_FallsBackWithoutSamples(t *testing.T) {
 	db := newTempDB(t)
 
-	e := newEvalCostEstimator(db, "claude-sonnet-5")
+	e := newEvalCostEstimator(db, "claude-sonnet-5", judgeBackendClaudeCLI)
 	got, fromActual := e.perSession(10)
 	if fromActual {
 		t.Error("実績が無いのに実績由来と報告された")
@@ -83,7 +83,7 @@ func TestEvalCostEstimator_UsesActuals(t *testing.T) {
 		}
 	}
 
-	e := newEvalCostEstimator(db, "claude-sonnet-5")
+	e := newEvalCostEstimator(db, "claude-sonnet-5", judgeBackendClaudeCLI)
 	got, fromActual := e.perSession(2)
 	if !fromActual {
 		t.Fatal("実績が 6 件あるのに既定値へ落ちた")
@@ -94,7 +94,7 @@ func TestEvalCostEstimator_UsesActuals(t *testing.T) {
 	}
 
 	// 別モデルの実績は混ざらない（単価が違うので混ぜると見積もりが壊れる）。
-	other := newEvalCostEstimator(db, "claude-haiku-4-5")
+	other := newEvalCostEstimator(db, "claude-haiku-4-5", judgeBackendClaudeCLI)
 	if _, fromActual := other.perSession(2); fromActual {
 		t.Error("別モデルの実績が使われた")
 	}
@@ -115,7 +115,7 @@ func TestEvalCostEstimator_UsesActuals(t *testing.T) {
 // TestEvalCostEstimator_Basis は見積もりの根拠の説明が実態に合うことを確かめる。
 // 「何を根拠にした数字か」が分からないと、確認が儀式になってしまう。
 func TestEvalCostEstimator_Basis(t *testing.T) {
-	e := &evalCostEstimator{model: "claude-sonnet-5", byBucket: map[string][]float64{}}
+	e := &evalCostEstimator{model: "claude-sonnet-5", reportsCost: true, byBucket: map[string][]float64{}}
 	tests := []struct {
 		name       string
 		fromActual int
@@ -133,5 +133,24 @@ func TestEvalCostEstimator_Basis(t *testing.T) {
 				t.Errorf("estimateBasis(%d, %d) = %q, want %q を含む", tt.fromActual, tt.total, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestEvalCostEstimator_BackendWithoutCost は実費を報告しないバックエンド
+// （codex-cli）で、金額を作らずその旨を説明することを確かめる。
+// 「$0.0000」だけを見せると無料だと読めてしまうため。
+func TestEvalCostEstimator_BackendWithoutCost(t *testing.T) {
+	db := newTempDB(t)
+
+	e := newEvalCostEstimator(db, "gpt-5.5", judgeBackendCodexCLI)
+	got, fromActual := e.perSession(10)
+	if fromActual {
+		t.Error("実費を報告しないバックエンドで実績由来と報告された")
+	}
+	if got != 0 {
+		t.Errorf("perSession() = %v, want 0（金額を作らない）", got)
+	}
+	if basis := e.estimateBasis(0, 5); !strings.Contains(basis, "見積もれません") {
+		t.Errorf("estimateBasis() = %q, want 見積もれない旨の説明", basis)
 	}
 }

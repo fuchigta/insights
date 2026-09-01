@@ -196,10 +196,19 @@ func indexFold(s, sub string) int {
 }
 
 // nonInteractiveEntrypoints は「対話セッションではない」とみなす entrypoint の集合。
-// 実データでは `claude -p`（Claude Agent SDK 経由の自動実行）が "sdk-cli" として現れる。
 // 非対話とみなす entrypoint が増えたら、判定ロジックを触らずここに追記すればよい。
+//
+//   - sdk-cli: `claude -p`（Claude Agent SDK 経由の自動実行）が実データで名乗る値
+//   - exec:    `codex exec`。人が同席しない一括実行のための入口
+//   - mcp:     Codex を MCP サーバ／app-server として動かした場合。呼び出し元は
+//     別のプログラムであり、実行中に人が軌道修正することはない
+//
+// Codex の内部スレッド（internal_*）とサブエージェント（subagent_*）もここに
+// 該当するが、そちらは IsSidechain として親に畳み込まれるので入れていない。
 var nonInteractiveEntrypoints = map[string]struct{}{
 	"sdk-cli": {},
+	"exec":    {},
+	"mcp":     {},
 }
 
 // IsInteractiveEntrypoint は entrypoint が対話セッション（ユーザーが同席していて、

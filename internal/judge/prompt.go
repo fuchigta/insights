@@ -124,6 +124,10 @@ func BuildSessionPrompt(in SessionPromptInput) (string, error) {
 func buildMetaSection(s *model.Session) string {
 	var b strings.Builder
 	b.WriteString("## セッション基本情報\n")
+	// どのエージェントのセッションかは評価の前提に効く（entrypoint の意味も、
+	// 使えるツールの種類も、モデルの選択肢も違う）。ソースを伏せると、評価者は
+	// 手前にあるプロンプトの記述から Claude Code だと思い込んでしまう。
+	fmt.Fprintf(&b, "- エージェント: %s\n", orDash(s.Source))
 	fmt.Fprintf(&b, "- プロジェクト: %s (%s)\n", orDash(s.ProjectLabel), orDash(s.ProjectPath))
 	fmt.Fprintf(&b, "- ブランチ: %s\n", orDash(s.GitBranch))
 	if strings.TrimSpace(s.Worktree) != "" {
@@ -140,7 +144,7 @@ func buildMetaSection(s *model.Session) string {
 	case model.IsInteractiveEntrypoint(s.Entrypoint):
 		b.WriteString("- 実行形態: 対話実行（ユーザーが同席し、実行中に軌道修正も検収もできる）\n")
 	default:
-		b.WriteString("- 実行形態: 非対話実行（claude -p などの自動実行。実行中にユーザーは介入も検収もできず、最初のプロンプトが仕様のすべて）\n")
+		b.WriteString("- 実行形態: 非対話実行（claude -p / codex exec などの自動実行。実行中にユーザーは介入も検収もできず、最初のプロンプトが仕様のすべて）\n")
 	}
 	fmt.Fprintf(&b, "- サブエージェント実行: %s\n", yesNo(s.IsSidechain))
 	if s.IsSidechain {

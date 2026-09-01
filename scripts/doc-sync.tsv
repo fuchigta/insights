@@ -38,6 +38,16 @@ internal/pricing/*	docs/cost.md
 # 1 回あたりの予算上限はコストの説明に既定値まで書いてある。
 internal/judge/claudecli/*.go	docs/cost.md	^[+-].*defaultMaxBudgetUSD
 
+# codex-cli には支出上限が無く、タイムアウトが唯一の歯止め。既定値をコストの説明に書いてある。
+internal/judge/codexcli/*.go	docs/cost.md	^[+-].*defaultTimeout
+
+# ログソースの実装は「置き場・圧縮・保持・非対話の入口」を開発ドキュメントの表に書いてある。
+# 実装の中身ではなく、その表に対応する定数が動いたときだけ発火させる。
+internal/source/*/*.go	docs/development.md	^[+-].*(Subdir|SUBDIR|rolloutPrefix|compressedSuffix|memoryDirName|subagentsDirName)
+
+# スキルの配置先はエージェントごとの表として設定の説明に書いてある。
+internal/skill/*/*.go	docs/configuration.md	^[+-].*(skillsDirName|codexHomeDirName|"skills")
+
 # コミット時・CI で走る検査の一覧は開発ドキュメントに書いてある。
 scripts/check-*.sh	docs/development.md
 .githooks/*	docs/development.md

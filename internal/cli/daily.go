@@ -190,7 +190,7 @@ func runDaily(
 	// 両方をまとめてここで 1 回だけ確認する。
 	pendingEvals := 0
 	// 見積もりは DB に残っている評価の実績から出す（internal/cli/estimate.go）。
-	estimator := newEvalCostEstimator(db, cfg.Judge.Model)
+	estimator := newEvalCostEstimator(db, cfg.Judge.Model, cfg.Judge.Backend)
 	evalEstimate := 0.0
 	evalFromActual := 0
 	if !noJudge {

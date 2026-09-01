@@ -19,6 +19,14 @@ func TestDefault(t *testing.T) {
 	if cfg.Sources.ClaudeCode.Root != "~/.claude" {
 		t.Errorf("Sources.ClaudeCode.Root = %q, want %q", cfg.Sources.ClaudeCode.Root, "~/.claude")
 	}
+	if !cfg.Sources.Codex.Enabled {
+		t.Error("Sources.Codex.Enabled = false, want true")
+	}
+	// codex の root は既定で空にしてある。Codex は $CODEX_HOME でログ置き場を移せるため、
+	// "~/.codex" を書き込むと移している利用者のログを取りこぼす（解決は実行時に行う）。
+	if cfg.Sources.Codex.Root != "" {
+		t.Errorf("Sources.Codex.Root = %q, want 空（実行時に $CODEX_HOME → ~/.codex で解決する）", cfg.Sources.Codex.Root)
+	}
 	if cfg.Judge.Backend != "claude-cli" {
 		t.Errorf("Judge.Backend = %q, want %q", cfg.Judge.Backend, "claude-cli")
 	}
