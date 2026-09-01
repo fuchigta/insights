@@ -11,7 +11,7 @@ import (
 const epsilon = 1e-9
 
 func TestLoad_EmbeddedTableIsPriced(t *testing.T) {
-	// prices.json は実際の Anthropic API 単価に差し替え済みなので、
+	// prices.json は実際の公開 API 単価（Anthropic / OpenAI）に差し替え済みなので、
 	// 主要モデルには単価が入っており UnpricedModels() は空になるはずである。
 	tbl, err := Load(nil)
 	if err != nil {
@@ -66,6 +66,13 @@ func TestRate_TableDriven(t *testing.T) {
 		{"日付サフィックス付きは完全一致優先", "claude-haiku-4-5-20260101", true, 999},
 		{"日付サフィックスを剥がした前方一致でフォールバック", "claude-haiku-4-5-20251225", true, 1},
 		{"前方一致でも解決できない日付なしの未知モデル", "claude-unknown-model-20251225", false, 0},
+		// 埋め込み表の gpt-* も同じ経路で引ける（overrides に無いモデルの確認）。
+		{"埋め込み表の OpenAI モデル", "gpt-5.3-codex", true, 1.75},
+		{"サイズ違いは個別の単価を引く", "gpt-5.4-mini", true, 0.75},
+		// 世代が違うモデルを安いほうへ吸い寄せないこと。"gpt-5" は登録済みだが、
+		// "gpt-5.7" は別世代なので未知として警告に出す必要がある。
+		{"世代違いは前方一致させない", "gpt-5.7", false, 0},
+		{"派生（- 区切り）は前方一致させる", "gpt-5.5-preview", true, 5},
 	}
 
 	for _, tt := range tests {
@@ -244,5 +251,43 @@ func TestCost_ThinkingTokensDoNotAffectCost(t *testing.T) {
 	}
 	if math.Abs(gotWithout-gotWith) > epsilon {
 		t.Errorf("ThinkingTokens の値でコストが変化した: ThinkingTokens=0 -> %v, ThinkingTokens=10000 -> %v", gotWithout, gotWith)
+	}
+}
+
+// TestCost_OpenAIModel は、埋め込み表の gpt-* をそのまま使ったときの金額を固定する。
+//
+// OpenAI 側はキャッシュ書き込みを別建てで課金せず（書き込み分は通常の入力として課金される）、
+// キャッシュ読み取りだけが割引レートになる。この対応付けを間違えると、Codex のセッションが
+// 静かに過大・過小の金額で出る。取り込み側（internal/source/codex）が
+// input_tokens からキャッシュ読み取り分を差し引いて渡す前提での計算になっている。
+func TestCost_OpenAIModel(t *testing.T) {
+	tbl, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Codex が報告した input_tokens=1,000,000 のうち 400,000 がキャッシュヒット、
+	// うち 100,000 が新たにキャッシュへ書かれた、という 1 レスポンス分。
+	u := model.Usage{
+		InputTokens:     600_000, // 1,000,000 - 400,000（取り込み時に差し引き済み）
+		OutputTokens:    200_000,
+		ThinkingTokens:  50_000, // OutputTokens の内訳なので加算されない
+		CacheCreation5m: 100_000,
+		CacheRead:       400_000,
+	}
+
+	got, known := tbl.Cost("gpt-5.5", u)
+	if !known {
+		t.Fatal("Cost() known = false, want true（gpt-5.5 は単価表にある）")
+	}
+
+	//   input:      600,000 tok * $5.00 / 1M = 3.00
+	//   output:     200,000 tok * $30.00/ 1M = 6.00
+	//   cache 書込: 100,000 tok * $0.00 / 1M = 0.00（別建てで課金されない）
+	//   cache 読取: 400,000 tok * $0.50 / 1M = 0.20
+	//   合計: 9.20
+	want := 9.20
+	if math.Abs(got-want) > epsilon {
+		t.Errorf("Cost() = %v, want %v", got, want)
 	}
 }

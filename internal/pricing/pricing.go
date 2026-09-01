@@ -135,11 +135,29 @@ func (t *Table) Rate(modelName string) (Rate, bool) {
 		if len(name) <= bestLen {
 			continue
 		}
-		if base == name || (len(name) > 0 && len(base) >= len(name) && base[:len(name)] == name) {
+		if isVariantOf(base, name) {
 			best, bestFound, bestLen = r, true, len(name)
 		}
 	}
 	return best, bestFound
+}
+
+// isVariantOf は modelName が registered そのものか、registered に "-" 区切りの
+// 派生（サイズ違い・日付など）を足したものかを返す。
+//
+// 単純な前方一致にしないのは、世代が上がっただけの別モデルを取り違えるため。
+// "gpt-5" が登録済みのとき、素の前方一致では "gpt-5.6-sol" まで拾ってしまい、
+// 3 世代前の安い単価で黙って計算される。世代の区切り（"."）をまたぐ一致は
+// 認めないことで、知らないモデルは「単価未登録」として警告に出せる
+// ——このツールでは、それらしい金額が出るより未知だと分かるほうが有用なので。
+func isVariantOf(modelName, registered string) bool {
+	if registered == "" || len(modelName) < len(registered) || modelName[:len(registered)] != registered {
+		return false
+	}
+	if len(modelName) == len(registered) {
+		return true
+	}
+	return modelName[len(registered)] == '-'
 }
 
 // Cost はモデルとトークン使用量から USD 建てのコストを算出する。
