@@ -1,4 +1,4 @@
-package claudecli
+package judge
 
 import (
 	"encoding/json"

@@ -1,4 +1,4 @@
-package claudecli
+package judge
 
 import (
 	"encoding/json"
@@ -7,16 +7,16 @@ import (
 
 func TestRequiredFields(t *testing.T) {
 	schema := json.RawMessage(`{"type":"object","required":["a","b"],"properties":{}}`)
-	got := requiredFields(schema)
+	got := RequiredFields(schema)
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
-		t.Fatalf("requiredFields() = %v, want [a b]", got)
+		t.Fatalf("RequiredFields() = %v, want [a b]", got)
 	}
 
-	if got := requiredFields(nil); got != nil {
-		t.Errorf("requiredFields(nil) = %v, want nil", got)
+	if got := RequiredFields(nil); got != nil {
+		t.Errorf("RequiredFields(nil) = %v, want nil", got)
 	}
-	if got := requiredFields(json.RawMessage(`{}`)); got != nil {
-		t.Errorf("requiredFields({}) = %v, want nil", got)
+	if got := RequiredFields(json.RawMessage(`{}`)); got != nil {
+		t.Errorf("RequiredFields({}) = %v, want nil", got)
 	}
 }
 
@@ -36,18 +36,18 @@ func TestValidateRequired(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateRequired(json.RawMessage(tt.data), required)
+			err := ValidateRequired(json.RawMessage(tt.data), required)
 			if tt.wantErr && err == nil {
-				t.Fatalf("validateRequired(%s) error = nil, wantErr", tt.data)
+				t.Fatalf("ValidateRequired(%s) error = nil, wantErr", tt.data)
 			}
 			if !tt.wantErr && err != nil {
-				t.Fatalf("validateRequired(%s) unexpected error = %v", tt.data, err)
+				t.Fatalf("ValidateRequired(%s) unexpected error = %v", tt.data, err)
 			}
 		})
 	}
 
 	// required が空なら常に nil。
-	if err := validateRequired(json.RawMessage(`{}`), nil); err != nil {
-		t.Errorf("validateRequired with no required fields should be nil, got %v", err)
+	if err := ValidateRequired(json.RawMessage(`{}`), nil); err != nil {
+		t.Errorf("ValidateRequired with no required fields should be nil, got %v", err)
 	}
 }

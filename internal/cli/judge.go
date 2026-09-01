@@ -17,7 +17,6 @@ import (
 
 	"github.com/fuchigta/insights/internal/config"
 	"github.com/fuchigta/insights/internal/judge"
-	"github.com/fuchigta/insights/internal/judge/claudecli"
 	"github.com/fuchigta/insights/internal/judge/prompts"
 	"github.com/fuchigta/insights/internal/model"
 	"github.com/fuchigta/insights/internal/store"
@@ -256,7 +255,7 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 	}
 
 	// 見積もりは固定値ではなく、DB に残っている評価の実績から出す（internal/cli/estimate.go）。
-	estimator := newEvalCostEstimator(db, cfg.Judge.Model)
+	estimator := newEvalCostEstimator(db, cfg.Judge.Model, cfg.Judge.Backend)
 	estimated, fromActual := estimator.estimateTargets(targets)
 	result.EstimatedCostUSD = estimated
 
@@ -559,34 +558,28 @@ type evalRunResult struct {
 	// RateLimited はレート制限を検知して残りの評価を打ち切ったことを表す。
 	// この状態では後続の AI 呼び出しも失敗するため、呼び出し側は先に進まない。
 	RateLimited   bool
-	CostUSD       float64  // RunInfo から取れた分の合計（claudecli.Judge 以外では 0 のまま）
-	RunSessionIDs []string // claude 実行自体の session_id（claudecli.Judge 以外では空のまま）
+	CostUSD       float64  // RunInfo から取れた分の合計（judge.Runner 未実装のバックエンドでは 0 のまま）
+	RunSessionIDs []string // 評価実行自体のセッション ID（同上、未実装なら空のまま）
 }
 
-// runInfoJudge は claudecli.Judge が実装する EvaluateRun を表す。judge.Judge インターフェースには
-// 含まれないメソッドなので、実装しているかどうかを型アサーションで検出する。
-// テスト用フェイクはこれを実装しなくてよく、その場合 RunInfo はゼロ値になる
-// （コスト・実行セッションIDは追跡できないが、評価フロー自体はテストできる）。
-type runInfoJudge interface {
-	EvaluateRun(ctx context.Context, req judge.Request) (json.RawMessage, claudecli.RunInfo, error)
-}
-
-// evaluateWithRunInfo は j が runInfoJudge を実装していれば EvaluateRun を、
+// evaluateWithRunInfo は j が judge.Runner を実装していれば EvaluateRun を、
 // そうでなければ judge.Judge.Evaluate を呼ぶ（後者の場合 RunInfo はゼロ値）。
-func evaluateWithRunInfo(ctx context.Context, j judge.Judge, req judge.Request) (json.RawMessage, claudecli.RunInfo, error) {
-	if rj, ok := j.(runInfoJudge); ok {
+// テスト用フェイクは Runner を実装しなくてよい
+// （コスト・実行セッションIDは追跡できないが、評価フロー自体はテストできる）。
+func evaluateWithRunInfo(ctx context.Context, j judge.Judge, req judge.Request) (json.RawMessage, judge.RunInfo, error) {
+	if rj, ok := j.(judge.Runner); ok {
 		return rj.EvaluateRun(ctx, req)
 	}
 	// 実装していないバックエンドでは評価コストと実行セッション ID を追跡できない。
 	// このツールは「評価そのものが本末転倒になっていないか」を自己監視する前提な
-	// ので、黙って $0 として集計すると自己監視が機能しなくなる。将来 Codex など
-	// 別バックエンドを足したときに気づけるよう警告を出す。
+	// ので、黙って $0 として集計すると自己監視が機能しなくなる。バックエンドを
+	// 足したときに気づけるよう警告を出す。
 	warnMissingRunInfoOnce.Do(func() {
 		slog.Warn("評価バックエンドが EvaluateRun を実装していないため、評価コストと実行セッション ID を記録できません",
 			"backend", j.Name())
 	})
 	raw, err := j.Evaluate(ctx, req)
-	return raw, claudecli.RunInfo{}, err
+	return raw, judge.RunInfo{}, err
 }
 
 // warnMissingRunInfoOnce は上記の警告をバックエンドごとに何度も出さないための制御。
@@ -601,14 +594,14 @@ func evaluateOneSession(
 	row store.SessionRow,
 	children []judge.ChildSummary,
 	costs map[string]*sessionCostAgg,
-) (json.RawMessage, claudecli.RunInfo, error) {
+) (json.RawMessage, judge.RunInfo, error) {
 	session, err := deps.DB.SessionByID(row.SessionID)
 	if err != nil {
-		return nil, claudecli.RunInfo{}, fmt.Errorf("セッション本文の取得に失敗しました: %w", err)
+		return nil, judge.RunInfo{}, fmt.Errorf("セッション本文の取得に失敗しました: %w", err)
 	}
 	evidenceItems, err := deps.DB.EvidenceFor(row.SessionID)
 	if err != nil {
-		return nil, claudecli.RunInfo{}, fmt.Errorf("成果物の取得に失敗しました: %w", err)
+		return nil, judge.RunInfo{}, fmt.Errorf("成果物の取得に失敗しました: %w", err)
 	}
 
 	var sessionCostUSD float64
@@ -634,7 +627,7 @@ func evaluateOneSession(
 		SessionCostPriced: sessionCostPriced,
 	})
 	if err != nil {
-		return nil, claudecli.RunInfo{}, fmt.Errorf("評価プロンプトの構築に失敗しました: %w", err)
+		return nil, judge.RunInfo{}, fmt.Errorf("評価プロンプトの構築に失敗しました: %w", err)
 	}
 
 	req := judge.Request{
@@ -662,11 +655,11 @@ func evaluateOneSession(
 // 「その他」へ落ちるのを防ぐため。
 func classifyEvalFailure(err error) string {
 	switch {
-	case errors.Is(err, claudecli.ErrRateLimited):
+	case errors.Is(err, judge.ErrRateLimited):
 		return store.EvalFailureRateLimit
-	case errors.Is(err, claudecli.ErrTimeout):
+	case errors.Is(err, judge.ErrTimeout):
 		return store.EvalFailureTimeout
-	case errors.Is(err, claudecli.ErrSchemaMismatch):
+	case errors.Is(err, judge.ErrSchemaMismatch):
 		return store.EvalFailureSchema
 	default:
 		return store.EvalFailureOther
@@ -718,7 +711,7 @@ func evaluateSessions(
 	type outcome struct {
 		sessionID string
 		raw       json.RawMessage
-		run       claudecli.RunInfo
+		run       judge.RunInfo
 		err       error
 	}
 
@@ -750,7 +743,7 @@ func evaluateSessions(
 					continue
 				}
 				raw, run, err := evaluateOneSession(evalCtx, deps, row, childrenByParent[row.SessionID], costs)
-				if errors.Is(err, claudecli.ErrRateLimited) {
+				if errors.Is(err, judge.ErrRateLimited) {
 					// 打ち切りは結果集約ループではなくここで行う。集約側に任せると、
 					// outcomes が全件ぶんバッファされているぶんワーカーが先に走り切れて
 					// しまい、打ち切りが間に合うかどうかが実行速度まかせになる。
@@ -792,7 +785,7 @@ func evaluateSessions(
 		}
 
 		if o.err != nil {
-			if errors.Is(o.err, claudecli.ErrRateLimited) && !result.RateLimited {
+			if errors.Is(o.err, judge.ErrRateLimited) && !result.RateLimited {
 				// 打ち切り自体はワーカー側で済んでいる。ここでは結果への記録と通知だけ行う。
 				result.RateLimited = true
 				if stderr != nil {

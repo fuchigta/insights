@@ -1,4 +1,4 @@
-package claudecli
+package judge
 
 import (
 	"encoding/json"
@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// requiredFields は JSON Schema（トップレベルの "required" 配列）から必須フィールド名を
+// RequiredFields は JSON Schema（トップレベルの "required" 配列）から必須フィールド名を
 // 取り出す。schema が空、または "required" を持たない場合は nil を返す（検証をスキップする）。
-func requiredFields(schema json.RawMessage) []string {
+func RequiredFields(schema json.RawMessage) []string {
 	if len(schema) == 0 {
 		return nil
 	}
@@ -21,12 +21,12 @@ func requiredFields(schema json.RawMessage) []string {
 	return s.Required
 }
 
-// validateRequired は data（トップレベルが JSON オブジェクトであること）が required に
+// ValidateRequired は data（トップレベルが JSON オブジェクトであること）が required に
 // 挙げられたキーをすべて持ち、かつそれらが null でないことを検証する。
 // ネストしたオブジェクトの中まで検証する完全な JSON Schema バリデータではなく、
 // 「スキーマの必須フィールドを満たさない場合に 1 回だけ再試行する」ための
 // 実用十分なチェックにとどめている（標準ライブラリのみで完結させるため）。
-func validateRequired(data json.RawMessage, required []string) error {
+func ValidateRequired(data json.RawMessage, required []string) error {
 	if len(required) == 0 {
 		return nil
 	}

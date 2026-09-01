@@ -33,20 +33,13 @@ const maxSchemaAttempts = 2
 // スキーマ不一致の再試行（maxSchemaAttempts）とは別枠。
 const maxTransientAttempts = 3
 
-// ErrRateLimited はレート制限らしき理由で claude の実行が失敗したことを表す番兵エラー。
-//
-// レート制限は「このセッションの評価だけが失敗した」のではなく、アカウント全体に効いて
-// いる状態を示す。文字列一致ではなく errors.Is で識別できるようにして、呼び出し側が残りの
-// セッションの評価を打ち切れるようにしている（制限中に叩き続けても失敗が増えるだけで、
-// 課金確認を通した意味も失われる）。
-var ErrRateLimited = errors.New("claude の実行がレート制限らしきエラーで失敗しました")
-
-// ErrTimeout / ErrSchemaMismatch も同じ理由で番兵にしている。評価の失敗は種類ごとに
-// 意味（利用者が取るべき手当て）が違うため、呼び出し側が errors.Is で仕分けて記録できる
-// ようにする。文字列一致で仕分けると、メッセージを直した瞬間に静かに壊れる。
+// 番兵エラーはバックエンドをまたいで同じ仕分けができるよう internal/judge に置いてある。
+// ここでは既存の呼び出し元がそのまま errors.Is で使えるよう別名を張るだけにする
+// （別名なので値は同一で、判定結果は judge 側のものと完全に一致する）。
 var (
-	ErrTimeout        = errors.New("claude の実行がタイムアウトしました")
-	ErrSchemaMismatch = errors.New("有効な評価 JSON を得られませんでした")
+	ErrRateLimited    = judge.ErrRateLimited
+	ErrTimeout        = judge.ErrTimeout
+	ErrSchemaMismatch = judge.ErrSchemaMismatch
 )
 
 // Options は Judge の構成。
@@ -71,13 +64,8 @@ type Options struct {
 // RunInfo は 1 回の claude 実行（session）のメタ情報。
 // insights 自身の評価コストを別掲したり、評価セッション自体を集計対象から
 // 除外したりするために SessionID・CostUSD を使う。
-type RunInfo struct {
-	SessionID  string
-	CostUSD    float64
-	DurationMS int64
-	NumTurns   int
-	Model      string
-}
+// 実体は judge.RunInfo（バックエンド共通）。
+type RunInfo = judge.RunInfo
 
 // Judge は judge.Judge を claude -p サブプロセスで実装する。
 //
@@ -155,7 +143,7 @@ func (j *Judge) EvaluateRun(ctx context.Context, req judge.Request) (json.RawMes
 
 	systemPrompt := buildSystemPrompt(req)
 	userPrompt := req.Prompt
-	required := requiredFields(req.Schema)
+	required := judge.RequiredFields(req.Schema)
 
 	var lastRun RunInfo
 	var lastErr error
@@ -183,7 +171,7 @@ func (j *Judge) EvaluateRun(ctx context.Context, req judge.Request) (json.RawMes
 		lastRun = run
 
 		if cliOut.IsError {
-			lastErr = fmt.Errorf("claude がエラーを報告しました (subtype=%s): %s", cliOut.Subtype, truncateForError(cliOut.Result))
+			lastErr = fmt.Errorf("claude がエラーを報告しました (subtype=%s): %s", cliOut.Subtype, judge.TruncateForError(cliOut.Result))
 			continue
 		}
 
@@ -196,14 +184,14 @@ func (j *Judge) EvaluateRun(ctx context.Context, req judge.Request) (json.RawMes
 		} else {
 			// 古い claude や --json-schema 非対応の経路のための後方互換。
 			var exErr error
-			extracted, exErr = ExtractJSON(cliOut.Result)
+			extracted, exErr = judge.ExtractJSON(cliOut.Result)
 			if exErr != nil {
 				lastErr = fmt.Errorf("応答から JSON を抽出できませんでした: %w", exErr)
 				continue
 			}
 		}
 
-		if err := validateRequired(extracted, required); err != nil {
+		if err := judge.ValidateRequired(extracted, required); err != nil {
 			lastErr = err
 			continue
 		}
@@ -414,7 +402,7 @@ func (j *Judge) runOnce(ctx context.Context, workDir, systemPrompt, userPrompt, 
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 			return nil, true, fmt.Errorf("%w (%s): %w", ErrTimeout, j.opts.Timeout, err)
 		}
-		if isRateLimitLike(stdout.String() + "\n" + stderr.String()) {
+		if judge.LooksRateLimited(stdout.String() + "\n" + stderr.String()) {
 			return nil, true, fmt.Errorf("%w: %w (stderr=%s)", ErrRateLimited, err, stderr.String())
 		}
 		// プロセス起動失敗（実行ファイルが見つからない等）も含め、一時的失敗として
@@ -424,19 +412,8 @@ func (j *Judge) runOnce(ctx context.Context, workDir, systemPrompt, userPrompt, 
 
 	var out cliOutput
 	if jsonErr := json.Unmarshal(stdout.Bytes(), &out); jsonErr != nil {
-		return nil, true, fmt.Errorf("claude の出力を JSON として解釈できませんでした: %w (stdout=%s)", jsonErr, truncateForError(stdout.String()))
+		return nil, true, fmt.Errorf("claude の出力を JSON として解釈できませんでした: %w (stdout=%s)", jsonErr, judge.TruncateForError(stdout.String()))
 	}
 
 	return &out, false, nil
-}
-
-// isRateLimitLike はプロセス出力にレート制限を示唆する文字列が含まれるかを見る。
-func isRateLimitLike(s string) bool {
-	lower := strings.ToLower(s)
-	for _, needle := range []string{"rate limit", "rate_limit", "too many requests", "429", "overloaded"} {
-		if strings.Contains(lower, needle) {
-			return true
-		}
-	}
-	return false
 }

@@ -1,4 +1,4 @@
-package claudecli
+package judge
 
 import (
 	"encoding/json"
@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// ExtractJSON は Claude の応答テキストから JSON オブジェクトを寛容に取り出す。
+// ExtractJSON は評価バックエンドの応答テキストから JSON オブジェクトを寛容に取り出す。
 // モデルは ```json フェンスで囲む、前後に短い説明文を付ける、といった振る舞いを
 // することがあるため、「最初の { から、それに対応する（＝波括弧の対応が取れた）
 // 最後の } まで」を文字列として抜き出す。この方式なら、コードフェンスの行
@@ -51,7 +51,7 @@ func ExtractJSON(s string) (json.RawMessage, error) {
 			if depth == 0 {
 				candidate := s[start : i+1]
 				if !json.Valid([]byte(candidate)) {
-					return nil, fmt.Errorf("抽出した範囲が有効な JSON ではありません: %s", truncateForError(candidate))
+					return nil, fmt.Errorf("抽出した範囲が有効な JSON ではありません: %s", TruncateForError(candidate))
 				}
 				return json.RawMessage(candidate), nil
 			}
@@ -61,7 +61,9 @@ func ExtractJSON(s string) (json.RawMessage, error) {
 	return nil, errors.New("対応する閉じ括弧 '}' が見つからず、JSON として不完全でした")
 }
 
-func truncateForError(s string) string {
+// TruncateForError はエラーメッセージに埋め込む文字列を切り詰める。
+// 応答本文がそのままログに流れて読めなくなるのを防ぐためのもの。
+func TruncateForError(s string) string {
 	const maxLen = 200
 	r := []rune(s)
 	if len(r) <= maxLen {
