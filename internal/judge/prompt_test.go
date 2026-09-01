@@ -400,3 +400,102 @@ func TestBuildSessionPrompt_Deterministic(t *testing.T) {
 		t.Errorf("同じ入力での2回の呼び出し結果が一致しない:\n--- 1回目 ---\n%s\n--- 2回目 ---\n%s", out1, out2)
 	}
 }
+
+// TestBuildSessionPrompt_Children_ModelsShownForDirection は、委譲の向き（親より安い
+// モデルへ下ろしたのか、高いモデルへ上げたのか）を評価者が判別できるだけの材料
+// ——親のモデルと子のモデル——が委譲セクションに出ることを検証する。
+func TestBuildSessionPrompt_Children_ModelsShownForDirection(t *testing.T) {
+	s := baseSession()
+	s.Messages = []model.Message{
+		{Seq: 1, Role: model.RoleUser, Text: "hello"},
+		{Seq: 2, Role: model.RoleAssistant, Text: "ok", Model: "claude-sonnet-5"},
+		{Seq: 3, Role: model.RoleAssistant, Text: "ok", Model: "claude-sonnet-5"},
+		{Seq: 4, Role: model.RoleAssistant, Text: "ok", Model: "claude-opus-5"},
+	}
+
+	children := []ChildSummary{
+		{SessionID: "child-1", AgentName: "ADVISOR", DurationMinutes: 3, CostUSD: 0.20, Priced: true, MessageCount: 8, Models: []string{"claude-opus-5"}},
+		{SessionID: "child-2", AgentName: "GREPPER", DurationMinutes: 1, CostUSD: 0.01, Priced: true, MessageCount: 4, Models: []string{"claude-haiku-4-5"}},
+	}
+
+	out, err := BuildSessionPrompt(SessionPromptInput{Session: s, Children: children})
+	if err != nil {
+		t.Fatalf("BuildSessionPrompt() error = %v", err)
+	}
+
+	// 親のモデルは利用ターン数の多い順。
+	if !strings.Contains(out, "- 親セッションのモデル: claude-sonnet-5, claude-opus-5\n") {
+		t.Errorf("親セッションのモデルが利用量順に出力されていない: %q", out)
+	}
+	if !strings.Contains(out, "- 委譲先のモデル内訳: claude-haiku-4-5 1件, claude-opus-5 1件\n") {
+		t.Errorf("委譲先のモデル内訳が出力されていない: %q", out)
+	}
+	for _, want := range []string{"[ADVISOR] model=claude-opus-5,", "[GREPPER] model=claude-haiku-4-5,"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("子ごとのモデルが出力されていない: %q in %q", want, out)
+		}
+	}
+}
+
+// TestBuildSessionPrompt_Children_UnknownModelIsExplicit は、モデルが取得できな
+// かった場合に空欄ではなく「不明」と出ることを検証する。空欄だと「親と同じだった」
+// のか「分からなかった」のかを評価者が区別できず、委譲の向きを誤って断定する。
+func TestBuildSessionPrompt_Children_UnknownModelIsExplicit(t *testing.T) {
+	s := baseSession()
+	s.Messages = []model.Message{{Seq: 1, Role: model.RoleUser, Text: "hello"}}
+
+	children := []ChildSummary{
+		{SessionID: "child-1", AgentName: "NO-MODEL", DurationMinutes: 1, MessageCount: 3},
+	}
+
+	out, err := BuildSessionPrompt(SessionPromptInput{Session: s, Children: children})
+	if err != nil {
+		t.Fatalf("BuildSessionPrompt() error = %v", err)
+	}
+
+	if !strings.Contains(out, "- 親セッションのモデル: 不明\n") {
+		t.Errorf("親のモデルが取れないときは「不明」と明示すべき: %q", out)
+	}
+	if !strings.Contains(out, "- 委譲先のモデル内訳: 不明 1件\n") {
+		t.Errorf("子のモデルが取れないときは「不明」と明示すべき: %q", out)
+	}
+	if !strings.Contains(out, "[NO-MODEL] model=不明,") {
+		t.Errorf("子ごとの行でもモデル不明を明示すべき: %q", out)
+	}
+}
+
+// TestBuildSessionPrompt_Children_ModelBreakdownCoversUnlistedChildren は、個別列挙が
+// 上限で打ち切られても、モデル内訳は全件から集計されることを検証する。切り捨てた側に
+// 別のモデルが混ざっていると、委譲の向きを読み違えるため。
+func TestBuildSessionPrompt_Children_ModelBreakdownCoversUnlistedChildren(t *testing.T) {
+	s := baseSession()
+	s.Messages = []model.Message{{Seq: 1, Role: model.RoleUser, Text: "hello"}}
+
+	var children []ChildSummary
+	for i := 0; i < maxDelegationListed; i++ {
+		children = append(children, ChildSummary{
+			SessionID: fmt.Sprintf("child-%d", i),
+			AgentName: fmt.Sprintf("AGENT-%02d", i),
+			CostUSD:   1.0,
+			Priced:    true,
+			Models:    []string{"claude-haiku-4-5"},
+		})
+	}
+	// コストが最も小さく、個別列挙からは漏れる子だけが別モデル。
+	children = append(children, ChildSummary{
+		SessionID: "child-last", AgentName: "AGENT-LAST", CostUSD: 0.001, Priced: true,
+		Models: []string{"claude-opus-5"},
+	})
+
+	out, err := BuildSessionPrompt(SessionPromptInput{Session: s, Children: children})
+	if err != nil {
+		t.Fatalf("BuildSessionPrompt() error = %v", err)
+	}
+
+	if strings.Contains(out, "AGENT-LAST") {
+		t.Fatalf("前提が崩れている: 列挙から漏れるはずの子が列挙されている: %q", out)
+	}
+	if !strings.Contains(out, "claude-opus-5 1件") {
+		t.Errorf("列挙から漏れた子のモデルが内訳に含まれていない: %q", out)
+	}
+}

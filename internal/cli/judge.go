@@ -403,6 +403,35 @@ func isInteractiveStdin(cmd *cobra.Command) bool {
 type sessionCostAgg struct {
 	CostUSD  float64
 	AllKnown bool // false なら単価未登録の usage を含む（過小評価の可能性がある）
+
+	// modelCounts はモデル名ごとの usage 行数。サブエージェントが「どのモデルで
+	// 動いたか」を委譲の要約に載せるために使う。金額と違い、単価が未登録でも
+	// モデル名は分かる（＝委譲の向きは判断できる）ので、AllKnown とは独立している。
+	modelCounts map[string]int
+}
+
+// models はこのセッションで使われたモデル名を利用量（usage 行数）の多い順に返す。
+func (a *sessionCostAgg) models() []string {
+	if a == nil || len(a.modelCounts) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(a.modelCounts))
+	for name := range a.modelCounts {
+		out = append(out, name)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if a.modelCounts[out[i]] != a.modelCounts[out[j]] {
+			return a.modelCounts[out[i]] > a.modelCounts[out[j]]
+		}
+		return out[i] < out[j]
+	})
+	return out
+}
+
+// isPseudoModel は API 呼び出しを伴わない擬似モデル名（`<synthetic>` など）かを返す。
+// 委譲の向きを読む材料としてはノイズにしかならないので、モデル名の集計から外す。
+func isPseudoModel(name string) bool {
+	return strings.HasPrefix(name, "<") && strings.HasSuffix(name, ">")
 }
 
 // aggregateSessionCosts は usage 行をセッション単位のコストに集計する。
@@ -411,13 +440,16 @@ func aggregateSessionCosts(rows []store.UsageRow) map[string]*sessionCostAgg {
 	for _, u := range rows {
 		agg, ok := out[u.SessionID]
 		if !ok {
-			agg = &sessionCostAgg{AllKnown: true}
+			agg = &sessionCostAgg{AllKnown: true, modelCounts: map[string]int{}}
 			out[u.SessionID] = agg
 		}
 		if u.CostKnown {
 			agg.CostUSD += u.CostUSD
 		} else {
 			agg.AllKnown = false
+		}
+		if name := strings.TrimSpace(u.Model); name != "" && !isPseudoModel(name) {
+			agg.modelCounts[name]++
 		}
 	}
 	return out
@@ -446,6 +478,7 @@ func buildChildSummaries(rows []store.SessionRow, costs map[string]*sessionCostA
 		if agg, ok := costs[r.SessionID]; ok {
 			cs.CostUSD = agg.CostUSD
 			cs.Priced = agg.AllKnown
+			cs.Models = agg.models()
 		}
 		out[r.ParentSessionID] = append(out[r.ParentSessionID], cs)
 	}

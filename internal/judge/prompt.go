@@ -37,6 +37,13 @@ type ChildSummary struct {
 	Priced          bool // false ならコストは信用できない（単価未登録）
 	MessageCount    int
 	ToolErrorCount  int
+
+	// Models は子セッションで使われたモデル名（利用量の多い順）。空のこともある。
+	//
+	// 委譲は向きによって評価基準が変わる（親より安いモデルへ下ろしたのならコストの
+	// 最適化、親より高いモデルへ上げたのなら難所の外注）。モデル名が渡っていないと
+	// 評価者はその向きを判別できず、どちらも同じ物差しで見てしまう。
+	Models []string
 }
 
 // SessionPromptInput は BuildSessionPrompt への入力。
@@ -80,7 +87,7 @@ func BuildSessionPrompt(in SessionPromptInput) (string, error) {
 
 	meta := buildMetaSection(in.Session)
 	modelsSection := buildModelUsageSection(in.Session)
-	delegationSection := buildDelegationSection(in.Children, in.SessionCostUSD, in.SessionCostPriced)
+	delegationSection := buildDelegationSection(in.Children, parentModels(in.Session), in.SessionCostUSD, in.SessionCostPriced)
 	toolsSection := buildToolSummarySection(in.Session)
 	evidenceSection := buildEvidenceSection(in.Evidence)
 	goalSection := buildGoalSection(in.Goal)
@@ -212,7 +219,11 @@ func buildModelUsageSection(s *model.Session) string {
 // 対比、そしてコスト降順で上位 maxDelegationListed 件の個別要約を出す。
 // 単価未登録（Priced == false）の子は金額を「単価未登録」と明示し、合計金額の
 // 計算には含めない（過小評価を金額があるかのように見せないため）。
-func buildDelegationSection(children []ChildSummary, sessionCostUSD float64, sessionCostPriced bool) string {
+//
+// parentModels（親が使ったモデル、利用量の多い順）を並べて出すのは、委譲の向きを
+// 評価者が判別できるようにするため。安いモデルへ下ろした委譲と高いモデルへ上げた
+// 委譲は狙いが違い、同じ物差しでは評価できない。
+func buildDelegationSection(children []ChildSummary, parentModels []string, sessionCostUSD float64, sessionCostPriced bool) string {
 	if len(children) == 0 {
 		return ""
 	}
@@ -257,8 +268,19 @@ func buildDelegationSection(children []ChildSummary, sessionCostUSD float64, ses
 	b.WriteString("サブエージェントは個別に AI 評価していない。ここにあるのは委譲した内容の要約のみで、\n")
 	b.WriteString("子セッションの中身（会話・個々のツール呼び出し）は評価者には見えていない。委譲の質は\n")
 	b.WriteString("「親がどう委譲し、どう受け取ったか」で判断すること。子の内部品質を断定しないこと。\n")
+	b.WriteString("親と子のモデルを見比べ、委譲の向き（親より安いモデルへ下ろしたのか、高いモデルへ\n")
+	b.WriteString("上げたのか、同等か）を判別すること。向きによって評価基準が変わる。\n")
 
+	if len(parentModels) > 0 {
+		fmt.Fprintf(&b, "- 親セッションのモデル: %s\n", strings.Join(parentModels, ", "))
+	} else {
+		b.WriteString("- 親セッションのモデル: 不明\n")
+	}
 	fmt.Fprintf(&b, "- 委譲件数: %d 件\n", len(sorted))
+	// 個別の列挙は上位 maxDelegationListed 件で打ち切るので、モデルの内訳だけは
+	// 全件から集計して出す。切り捨てた側に別のモデルが混ざっていると、委譲の向きを
+	// 読み違えることになるため。
+	fmt.Fprintf(&b, "- 委譲先のモデル内訳: %s\n", formatChildModelBreakdown(sorted))
 	fmt.Fprintf(&b, "- 委譲先の合計時間: %s\n", formatDelegationMinutes(totalDuration))
 	fmt.Fprintf(&b, "- 委譲先の合計メッセージ数: %d 件\n", totalMessages)
 	fmt.Fprintf(&b, "- 委譲先の合計ツールエラー数: %d 件\n", totalToolErrors)
@@ -298,14 +320,96 @@ func buildDelegationSection(children []ChildSummary, sessionCostUSD float64, ses
 		if strings.TrimSpace(name) == "" {
 			name = "(説明なし)"
 		}
-		fmt.Fprintf(&b, "- [%s] %s, %s, %dメッセージ, ツールエラー%d件\n",
-			name, formatDelegationMinutes(c.DurationMinutes), formatDelegationMoney(c.CostUSD, c.Priced), c.MessageCount, c.ToolErrorCount)
+		fmt.Fprintf(&b, "- [%s] model=%s, %s, %s, %dメッセージ, ツールエラー%d件\n",
+			name, formatChildModels(c.Models), formatDelegationMinutes(c.DurationMinutes),
+			formatDelegationMoney(c.CostUSD, c.Priced), c.MessageCount, c.ToolErrorCount)
 	}
 	if rest > 0 {
 		fmt.Fprintf(&b, "...(他 %d 件)\n", rest)
 	}
 
 	return b.String()
+}
+
+// parentModels は親セッション自身が使ったモデル名を利用量（ターン数）の多い順に返す。
+// 委譲の向きは「親のモデルと子のモデルの比較」でしか決まらないため、委譲セクションに
+// 親側を並べて出すのに使う。
+func parentModels(s *model.Session) []string {
+	if s == nil {
+		return nil
+	}
+	turns := map[string]int{}
+	var order []string
+	for _, m := range s.Messages {
+		if m.Role != model.RoleAssistant || m.Model == "" {
+			continue
+		}
+		if _, ok := turns[m.Model]; !ok {
+			order = append(order, m.Model)
+		}
+		turns[m.Model]++
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		if turns[order[i]] != turns[order[j]] {
+			return turns[order[i]] > turns[order[j]]
+		}
+		return order[i] < order[j]
+	})
+	return order
+}
+
+// formatChildModels は子セッション 1 件のモデル表示。未取得なら「不明」と明示する
+// （空欄にすると、モデルが同じだったのか分からなかったのかを区別できないため）。
+func formatChildModels(models []string) string {
+	var kept []string
+	for _, m := range models {
+		if strings.TrimSpace(m) != "" {
+			kept = append(kept, m)
+		}
+	}
+	if len(kept) == 0 {
+		return "不明"
+	}
+	return strings.Join(kept, "+")
+}
+
+// formatChildModelBreakdown は委譲先で使われたモデルを「モデル名 N件」の形にまとめる。
+// 1 件の子が複数モデルを使っていればそのすべてに数える。件数降順・同数ならモデル名順。
+func formatChildModelBreakdown(children []ChildSummary) string {
+	counts := map[string]int{}
+	var order []string
+	add := func(name string) {
+		if _, ok := counts[name]; !ok {
+			order = append(order, name)
+		}
+		counts[name]++
+	}
+	for _, c := range children {
+		seen := map[string]bool{}
+		for _, m := range c.Models {
+			m = strings.TrimSpace(m)
+			if m == "" || seen[m] {
+				continue
+			}
+			seen[m] = true
+			add(m)
+		}
+		if len(seen) == 0 {
+			add("不明")
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		if counts[order[i]] != counts[order[j]] {
+			return counts[order[i]] > counts[order[j]]
+		}
+		return order[i] < order[j]
+	})
+
+	parts := make([]string, 0, len(order))
+	for _, name := range order {
+		parts = append(parts, fmt.Sprintf("%s %d件", name, counts[name]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // formatDelegationMoney は委譲セクション用の金額表示。priced が false の場合は

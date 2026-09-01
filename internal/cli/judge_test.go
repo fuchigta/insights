@@ -102,6 +102,11 @@ func TestPrepareEvalTargets_ExcludesSidechainAndBuildsChildSummary(t *testing.T)
 	if !kids[0].Priced || kids[0].CostUSD != 0.02 {
 		t.Errorf("child cost = (priced=%v, usd=%v), want (true, 0.02)", kids[0].Priced, kids[0].CostUSD)
 	}
+	// 委譲の向き（親より安いモデルへ下ろしたのか、高いモデルへ上げたのか）を評価者が
+	// 判別できるよう、子が動いたモデルも要約に含める。
+	if len(kids[0].Models) != 1 || kids[0].Models[0] != "claude-sonnet-5" {
+		t.Errorf("child models = %v, want [claude-sonnet-5]", kids[0].Models)
+	}
 
 	if agg, ok := costs["parent-1"]; !ok || agg.CostUSD != 0.10 || !agg.AllKnown {
 		t.Errorf("costs[parent-1] = %+v, want CostUSD=0.10 AllKnown=true", agg)
@@ -554,5 +559,38 @@ func TestJudge_NoTargetsSkipsConfirmAndBuild(t *testing.T) {
 	// --json では無いので stdout は人間向けテキスト。最低限、空振りメッセージが出ていることを確認する。
 	if !strings.Contains(outBuf.String(), "評価対象がありません") {
 		t.Errorf("stdout に「評価対象がありません」が無い: %s", outBuf.String())
+	}
+}
+
+// TestAggregateSessionCosts_Models は、セッションで使われたモデルが利用量の多い順に
+// 集計され、API 呼び出しを伴わない擬似モデルが除外されることを検証する。委譲の要約に
+// 載せて「どのモデルへ委譲したのか」を評価者に伝えるための材料になる。
+func TestAggregateSessionCosts_Models(t *testing.T) {
+	ts := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	rows := []store.UsageRow{
+		{SessionID: "s1", Timestamp: ts, Model: "claude-opus-5", CostUSD: 0.10, CostKnown: true},
+		{SessionID: "s1", Timestamp: ts, Model: "claude-haiku-4-5", CostUSD: 0.01, CostKnown: true},
+		{SessionID: "s1", Timestamp: ts, Model: "claude-haiku-4-5", CostUSD: 0.01, CostKnown: true},
+		{SessionID: "s1", Timestamp: ts, Model: "<synthetic>", CostKnown: true},
+		{SessionID: "s2", Timestamp: ts, Model: "", CostKnown: false},
+	}
+
+	got := aggregateSessionCosts(rows)
+
+	models := got["s1"].models()
+	want := []string{"claude-haiku-4-5", "claude-opus-5"}
+	if len(models) != len(want) {
+		t.Fatalf("models = %v, want %v（擬似モデルは除外し、利用量の多い順）", models, want)
+	}
+	for i := range want {
+		if models[i] != want[i] {
+			t.Fatalf("models = %v, want %v（擬似モデルは除外し、利用量の多い順）", models, want)
+		}
+	}
+
+	// モデル名が取れない usage しか無いセッションでは、空の一覧を返す
+	// （委譲セクション側で「不明」と明示させるため）。
+	if m := got["s2"].models(); len(m) != 0 {
+		t.Errorf("models = %v, want 空（モデル名が取れていない）", m)
 	}
 }
