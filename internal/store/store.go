@@ -970,6 +970,34 @@ func (d *DB) ActionsForVerification(date string) ([]model.Action, error) {
 	return scanActions(rows)
 }
 
+// ActionsCreatedOn は created_on が date の改善アクションを返す。
+//
+// 同じ日の振り返りを回し直すとき、前回の実行が作った提案を掃除するために使う
+// （rollup.PersistRetro）。どれを消すかの判断は呼び出し側が持つ。
+func (d *DB) ActionsCreatedOn(date string) ([]model.Action, error) {
+	rows, err := d.db.Query(`
+		SELECT id, created_on, title, detail, category, status, verdict, verified_on
+		FROM actions WHERE created_on = ?
+		ORDER BY id
+	`, date)
+	if err != nil {
+		return nil, fmt.Errorf("actions の取得に失敗: %w", err)
+	}
+	defer rows.Close()
+	return scanActions(rows)
+}
+
+// DeleteAction は改善アクションを 1 件削除する。
+//
+// 状態を変えるのではなく行ごと消すのは、消す対象が「回し直しで無かったことになった
+// 前回実行の提案」だからで、dropped として残すと畳んだ判断と区別が付かなくなる。
+func (d *DB) DeleteAction(id int64) error {
+	if _, err := d.db.Exec(`DELETE FROM actions WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("action(id=%d) の削除に失敗: %w", id, err)
+	}
+	return nil
+}
+
 // AllActions は全ての改善アクションを返す。
 func (d *DB) AllActions() ([]model.Action, error) {
 	rows, err := d.db.Query(`

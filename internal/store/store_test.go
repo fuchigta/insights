@@ -585,6 +585,60 @@ func TestActionsForVerification(t *testing.T) {
 	}
 }
 
+func TestActionsCreatedOn_AndDeleteAction(t *testing.T) {
+	d := openTestDB(t)
+
+	mk := func(createdOn, title string) int64 {
+		t.Helper()
+		id, err := d.CreateAction(&model.Action{CreatedOn: createdOn, Title: title})
+		if err != nil {
+			t.Fatalf("CreateAction(%s) error = %v", title, err)
+		}
+		return id
+	}
+
+	before := mk("2026-08-28", "前日の提案")
+	todayA := mk("2026-08-29", "当日の提案A")
+	todayB := mk("2026-08-29", "当日の提案B")
+
+	got, err := d.ActionsCreatedOn("2026-08-29")
+	if err != nil {
+		t.Fatalf("ActionsCreatedOn() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("ActionsCreatedOn() len = %d, want 2: %+v", len(got), got)
+	}
+	if got[0].ID != todayA || got[1].ID != todayB {
+		t.Errorf("ActionsCreatedOn() の並び = %d, %d, want %d, %d（ID 昇順）",
+			got[0].ID, got[1].ID, todayA, todayB)
+	}
+
+	if err := d.DeleteAction(todayA); err != nil {
+		t.Fatalf("DeleteAction() error = %v", err)
+	}
+
+	all, err := d.AllActions()
+	if err != nil {
+		t.Fatalf("AllActions() error = %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("削除後の AllActions() len = %d, want 2: %+v", len(all), all)
+	}
+	for _, a := range all {
+		if a.ID == todayA {
+			t.Errorf("削除したはずの action(id=%d) が残っている", todayA)
+		}
+	}
+	if all[0].ID != before {
+		t.Errorf("別の日の提案まで消えている: %+v", all)
+	}
+
+	// 存在しない ID の削除はエラーにしない（呼び出し側が競合を気にせず消せるように）。
+	if err := d.DeleteAction(todayA); err != nil {
+		t.Errorf("存在しない ID の DeleteAction() error = %v, want nil", err)
+	}
+}
+
 func TestActions_CreateAndUpdateStatus(t *testing.T) {
 	d := openTestDB(t)
 
