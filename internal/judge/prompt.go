@@ -27,8 +27,9 @@ const maxOmittedUserExcerpt = 5
 const maxDelegationListed = 5
 
 // ChildSummary は親セッションから委譲されたサブエージェント 1 件の要約。
-// サブエージェントは個別に AI 評価せず、この要約として親セッションの評価に含める
-// （委譲の妥当性は「親がどう使ったか」として評価する、という方針による）。
+// サブエージェント自身も個別に AI 評価するが、その台本（会話・ツール呼び出し）は
+// 親の評価には渡さない。親に渡すのはこの要約と子の評価結果だけであり、委譲の妥当性は
+// 「親がどう委譲したか」として評価する。
 type ChildSummary struct {
 	SessionID       string
 	AgentName       string // サブエージェントの説明（.meta.json の description 由来）。空のこともある
@@ -44,6 +45,19 @@ type ChildSummary struct {
 	// 最適化、親より高いモデルへ上げたのなら難所の外注）。モデル名が渡っていないと
 	// 評価者はその向きを判別できず、どちらも同じ物差しで見てしまう。
 	Models []string
+
+	// Evaluated は子セッションの AI 評価結果が揃っているかどうか。false のときは
+	// 以下の評価由来のフィールドをすべて無視する（同じ実行の中で子がまだ評価されて
+	// いない、評価に失敗した、といったときに起こる）。
+	Evaluated bool
+	// Outcome は子セッションの達成度（achieved / partial / abandoned / exploratory）。
+	// 委譲した作業が実際に完遂されたのかを、要約からの推測ではなく評価結果として渡す。
+	Outcome string
+	// OutcomeSummary は子セッションの短い要約（評価の outcome_summary）。
+	OutcomeSummary string
+	// ReworkOccurred は子セッションで手戻りが起きたかどうか。委譲の粒度や
+	// 親からの指示の過不足を読むための材料になる。
+	ReworkOccurred bool
 }
 
 // SessionPromptInput は BuildSessionPrompt への入力。
@@ -254,11 +268,29 @@ func buildDelegationSection(children []ChildSummary, parentModels []string, sess
 		pricedCostUSD   float64
 		pricedCount     int
 		unpricedCount   int
+		evaluatedCount  int
+		reworkCount     int
 	)
+	// 子の達成度は「どの値が何件か」を出す。列挙値は固定だが、出現順を保って
+	// 並べたいので map と順序の両方を持つ。
+	outcomeCounts := map[string]int{}
+	var outcomeOrder []string
 	for _, c := range sorted {
 		totalDuration += c.DurationMinutes
 		totalMessages += c.MessageCount
 		totalToolErrors += c.ToolErrorCount
+		if c.Evaluated {
+			evaluatedCount++
+			if o := strings.TrimSpace(c.Outcome); o != "" {
+				if _, ok := outcomeCounts[o]; !ok {
+					outcomeOrder = append(outcomeOrder, o)
+				}
+				outcomeCounts[o]++
+			}
+			if c.ReworkOccurred {
+				reworkCount++
+			}
+		}
 		if c.Priced {
 			pricedCostUSD += c.CostUSD
 			pricedCount++
@@ -269,9 +301,13 @@ func buildDelegationSection(children []ChildSummary, parentModels []string, sess
 
 	var b strings.Builder
 	b.WriteString("## 委譲（サブエージェントへの委譲）\n")
-	b.WriteString("サブエージェントは個別に AI 評価していない。ここにあるのは委譲した内容の要約のみで、\n")
-	b.WriteString("子セッションの中身（会話・個々のツール呼び出し）は評価者には見えていない。委譲の質は\n")
-	b.WriteString("「親がどう委譲し、どう受け取ったか」で判断すること。子の内部品質を断定しないこと。\n")
+	b.WriteString("子セッションも個別に AI 評価しており、その結果（達成度・手戻り・短い要約）をここに載せている。\n")
+	b.WriteString("ただし子セッションの台本（会話・個々のツール呼び出し）は評価者には見えていないので、\n")
+	b.WriteString("子の内部品質を断定しないこと。\n")
+	b.WriteString("**委譲するかどうか、どのサブエージェントに何を任せるかを決めたのは AI であってユーザーではない。**\n")
+	b.WriteString("したがって「委譲した成果をユーザーが検収すべきだった」という指摘は書かないこと（ユーザーに\n")
+	b.WriteString("打ち手が無い）。ここを材料に書けるのは、ユーザーが最初の依頼で示しておけば委譲の空回りを\n")
+	b.WriteString("防げたこと（前提・完了条件・触ってよい範囲）だけである。\n")
 	b.WriteString("親と子のモデルを見比べ、委譲の向き（親より安いモデルへ下ろしたのか、高いモデルへ\n")
 	b.WriteString("上げたのか、同等か）を判別すること。向きによって評価基準が変わる。\n")
 
@@ -288,6 +324,14 @@ func buildDelegationSection(children []ChildSummary, parentModels []string, sess
 	fmt.Fprintf(&b, "- 委譲先の合計時間: %s\n", formatDelegationMinutes(totalDuration))
 	fmt.Fprintf(&b, "- 委譲先の合計メッセージ数: %d 件\n", totalMessages)
 	fmt.Fprintf(&b, "- 委譲先の合計ツールエラー数: %d 件\n", totalToolErrors)
+	if evaluatedCount == 0 {
+		// 子がまだ評価されていない実行（評価に失敗した、順序の都合で間に合わなかった）。
+		// 「達成できなかった」と読み違えられないよう、無いことをはっきり書く。
+		b.WriteString("- 委譲先の評価: 未評価（この実行では子の達成度を判断材料にできない）\n")
+	} else {
+		fmt.Fprintf(&b, "- 委譲先の達成度内訳: %s\n", formatChildOutcomes(outcomeCounts, outcomeOrder, len(sorted)-evaluatedCount))
+		fmt.Fprintf(&b, "- 委譲先で手戻りが起きた件数: %d 件（評価済み %d 件中）\n", reworkCount, evaluatedCount)
+	}
 
 	switch {
 	case unpricedCount == 0:
@@ -324,15 +368,50 @@ func buildDelegationSection(children []ChildSummary, parentModels []string, sess
 		if strings.TrimSpace(name) == "" {
 			name = "(説明なし)"
 		}
-		fmt.Fprintf(&b, "- [%s] model=%s, %s, %s, %dメッセージ, ツールエラー%d件\n",
+		fmt.Fprintf(&b, "- [%s] model=%s, %s, %s, %dメッセージ, ツールエラー%d件%s\n",
 			name, formatChildModels(c.Models), formatDelegationMinutes(c.DurationMinutes),
-			formatDelegationMoney(c.CostUSD, c.Priced), c.MessageCount, c.ToolErrorCount)
+			formatDelegationMoney(c.CostUSD, c.Priced), c.MessageCount, c.ToolErrorCount,
+			formatChildVerdict(c))
+		if sum := strings.TrimSpace(c.OutcomeSummary); c.Evaluated && sum != "" {
+			fmt.Fprintf(&b, "  要約: %s\n", sum)
+		}
 	}
 	if rest > 0 {
 		fmt.Fprintf(&b, "...(他 %d 件)\n", rest)
 	}
 
 	return b.String()
+}
+
+// formatChildOutcomes は子セッションの達成度の内訳を 1 行にまとめる。
+// unevaluated が 0 より大きいときだけ末尾に付けるのは、評価済みの件数と
+// 委譲件数が食い違って見えるのを防ぐため。
+func formatChildOutcomes(counts map[string]int, order []string, unevaluated int) string {
+	parts := make([]string, 0, len(order))
+	for _, k := range order {
+		parts = append(parts, fmt.Sprintf("%s %d 件", k, counts[k]))
+	}
+	out := strings.Join(parts, ", ")
+	if unevaluated > 0 {
+		out += fmt.Sprintf("（未評価 %d 件）", unevaluated)
+	}
+	return out
+}
+
+// formatChildVerdict は個別列挙の行に足す、子セッションの評価結果の短い表記。
+// 未評価なら何も足さない（「不明」と書くと行が伸びるだけで情報が増えない）。
+func formatChildVerdict(c ChildSummary) string {
+	if !c.Evaluated {
+		return ""
+	}
+	out := ""
+	if o := strings.TrimSpace(c.Outcome); o != "" {
+		out += ", 達成度=" + o
+	}
+	if c.ReworkOccurred {
+		out += ", 手戻りあり"
+	}
+	return out
 }
 
 // parentModels は親セッション自身が使ったモデル名を利用量（ターン数）の多い順に返す。

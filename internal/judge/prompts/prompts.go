@@ -18,7 +18,7 @@ import (
 // 必ずこの値を変更すること。変更しないと、古いプロンプトで評価済みのセッションが
 // 新しいプロンプトでも同じキャッシュとして扱われてしまい、評価内容が古いまま
 // 気付かれずに使い回されてしまう。
-const PromptVersion = "session-eval-v8"
+const PromptVersion = "session-eval-v9"
 
 //go:embed session_eval.md
 var sessionEvalPrompt string

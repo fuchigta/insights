@@ -193,6 +193,77 @@ func TestBuildDaily_FacetsAggregation(t *testing.T) {
 	}
 }
 
+// サブエージェントは評価していても Facets（分布）には入れない。スポーンしたのは AI で
+// あってユーザーではないため、混ぜると分布が「ユーザーの任せ方」を表さなくなる。
+// ワークツリーのサブエージェント（レポートでは独立したカードとして扱う）も同じ。
+func TestBuildDaily_SidechainEvalsAreNotInFacets(t *testing.T) {
+	prices := testPrices(t)
+	base := mustTime(t, "2026-08-29T01:00:00Z")
+
+	in := DailyInput{
+		Date:   "2026-08-29",
+		Prices: prices,
+		Sessions: []SessionData{
+			{
+				Row:  store.SessionRow{SessionID: "s-parent", ProjectPath: "/p", ProjectLabel: "p", Entrypoint: "cli", StartedAt: base, EndedAt: base},
+				Eval: &model.Eval{Outcome: "achieved", Ownership: model.LevelReason{Level: "understood"}},
+			},
+			{
+				Row: store.SessionRow{
+					SessionID: "s-child", ProjectPath: "/p", ProjectLabel: "p", Entrypoint: "cli",
+					IsSidechain: true, ParentSessionID: "s-parent", StartedAt: base, EndedAt: base,
+				},
+				Eval: &model.Eval{Outcome: "partial", Ownership: model.LevelReason{Level: "black_box"}},
+			},
+			{
+				Row: store.SessionRow{
+					SessionID: "s-wt-child", ProjectPath: "/p", ProjectLabel: "p", Entrypoint: "cli",
+					Worktree: "feat-x", IsSidechain: true, ParentSessionID: "s-parent",
+					StartedAt: base, EndedAt: base,
+				},
+				Eval: &model.Eval{Outcome: "abandoned", Ownership: model.LevelReason{Level: "black_box"}},
+			},
+		},
+	}
+
+	d, err := BuildDaily(in)
+	if err != nil {
+		t.Fatalf("BuildDaily() error = %v", err)
+	}
+
+	if got := d.Facets.Outcome["achieved"]; got != 1 {
+		t.Errorf("Facets.Outcome[achieved] = %d, want 1", got)
+	}
+	if got := d.Facets.Outcome["partial"]; got != 0 {
+		t.Errorf("Facets.Outcome[partial] = %d, want 0（サブエージェントは含めない）", got)
+	}
+	if got := d.Facets.Outcome["abandoned"]; got != 0 {
+		t.Errorf("Facets.Outcome[abandoned] = %d, want 0（ワークツリーのサブエージェントも含めない）", got)
+	}
+	if got := d.Facets.Ownership["black_box"]; got != 0 {
+		t.Errorf("Facets.Ownership[black_box] = %d, want 0", got)
+	}
+	if d.Meta.UnevaluatedSessions != 0 {
+		t.Errorf("Meta.UnevaluatedSessions = %d, want 0（3 件とも評価済み）", d.Meta.UnevaluatedSessions)
+	}
+
+	var stat *ProjectStat
+	for i := range d.ByProject {
+		if d.ByProject[i].ProjectPath == "/p" {
+			stat = &d.ByProject[i]
+		}
+	}
+	if stat == nil {
+		t.Fatal("プロジェクト /p の集計がありません")
+	}
+	if stat.EvaluatedSessions != 1 {
+		t.Errorf("EvaluatedSessions = %d, want 1（Facets に入れた件数と揃っていること）", stat.EvaluatedSessions)
+	}
+	if stat.AchievedRatio != 1 {
+		t.Errorf("AchievedRatio = %v, want 1", stat.AchievedRatio)
+	}
+}
+
 func TestBuildDaily_EmptyFacetsAreNotNil(t *testing.T) {
 	prices := testPrices(t)
 	base := mustTime(t, "2026-08-29T01:00:00Z")
@@ -505,9 +576,9 @@ func TestBuildDaily_SidechainFoldedIntoParent(t *testing.T) {
 		t.Errorf("Totals.SidechainSessions = %d, want 1", d.Totals.SidechainSessions)
 	}
 
-	// 親も子も未評価だが、sidechain は方針として評価対象外なので数えない。
-	if d.Meta.UnevaluatedSessions != 1 {
-		t.Errorf("Meta.UnevaluatedSessions = %d, want 1（sidechain は含めない）", d.Meta.UnevaluatedSessions)
+	// sidechain も評価対象なので、未評価はすべて評価漏れとして数える。
+	if d.Meta.UnevaluatedSessions != 2 {
+		t.Errorf("Meta.UnevaluatedSessions = %d, want 2（sidechain も評価対象）", d.Meta.UnevaluatedSessions)
 	}
 }
 

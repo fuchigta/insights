@@ -311,13 +311,17 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 		pa.stat.CostUSD += sessionCost
 
 		if sd.Eval == nil {
-			// 方針として評価しない sidechain は「評価に失敗・未実施」としてカウントしない。
-			// 評価対象外であることと評価漏れは別の問題であり、混同するとレポートの読者を惑わす。
-			// ワークツリーの sidechain は評価対象なので、未評価なら数える。
-			if !row.IsSidechain || row.IsWorktreeSidechain() {
-				d.Meta.UnevaluatedSessions++
-			}
-		} else {
+			// sidechain も含めて全セッションが評価対象なので、未評価はすべて評価漏れ。
+			d.Meta.UnevaluatedSessions++
+		} else if !row.IsSidechain {
+			// 分布（Facets）に入れるのは、ユーザーが直接回したセッションだけ。
+			// サブエージェントをスポーンしたのは AI であってユーザーではないので、
+			// その達成度やオーナーシップを混ぜると、分布が「ユーザーの任せ方」ではなく
+			// 「AI の下請け実行の内訳」になる。実データでは sidechain が 7 割を占めるため、
+			// 混ぜた瞬間に分布はそちらに支配される。ワークツリーの sidechain も同じ理由で
+			// 入れない（レポート上は独立したカードとして扱うが、それは表示の話であって、
+			// ユーザーの任せ方の分布とは別問題）。
+			// サブエージェントの評価結果は、親セッションの評価プロンプト（委譲の要約）で使う。
 			addFacetsFromEval(&d.Facets, sd.Eval)
 			pa.stat.EvaluatedSessions++
 			addFacetsFromEval(&pa.stat.Facets, sd.Eval)

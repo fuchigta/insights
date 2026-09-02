@@ -76,7 +76,8 @@ func newJudgeCommand() *cobra.Command {
 		Short: "未評価セッションを AI で評価する",
 		Long: "対象期間（--date 単日、または --from/--to。どちらも無ければ今日）の未評価セッションを\n" +
 			"AI（claude -p）で評価し、結果を DB にキャッシュする。\n" +
-			"サブエージェント（IsSidechain）は個別に評価しない（親セッションの評価に委譲の要約として含める）。\n" +
+			"サブエージェント（IsSidechain）も個別に評価する。ただし親より先に評価し、その結果は" +
+			"親セッションの委譲の要約にも載せる。\n" +
 			"評価には課金が発生するため、対話端末では実行前に確認する。非対話環境では --yes が必須。",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.Date != "" && (opts.From != "" || opts.To != "") {
@@ -168,7 +169,6 @@ type judgeResult struct {
 	Force               bool          `json:"force"`
 	TotalSessions       int           `json:"total_sessions"`
 	ConfigExcluded      int           `json:"config_excluded"` // exclude.projects / exclude.entrypoints で除外した件数
-	SidechainExcluded   int           `json:"sidechain_excluded"`
 	CacheSkipped        int           `json:"cache_skipped"`
 	Targeted            int           `json:"targeted"` // --limit 適用後、実際に評価しようとした件数
 	Evaluated           int           `json:"evaluated"`
@@ -232,22 +232,21 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 		return nil, fmt.Errorf("usage の取得に失敗しました: %w", err)
 	}
 
-	targets, sidechainExcluded, cacheSkipped, childrenByParent, costs, err := prepareEvalTargets(
-		db, rows, usageRows, opts.Force, prompts.PromptVersion)
+	plan, err := prepareEvalTargets(db, rows, usageRows, opts.Force, prompts.PromptVersion)
 	if err != nil {
 		return nil, err
 	}
-	result.SidechainExcluded = sidechainExcluded
-	result.CacheSkipped = cacheSkipped
+	result.CacheSkipped = plan.CacheSkipped
 
+	targets := plan.Targets
 	if opts.Limit > 0 && len(targets) > opts.Limit {
 		targets = targets[:opts.Limit]
 	}
 	result.Targeted = len(targets)
 
 	stderr := cmd.ErrOrStderr()
-	fmt.Fprintf(stderr, "insights judge: 評価対象 %d 件（サブエージェント除外 %d 件, キャッシュ済み除外 %d 件）\n",
-		len(targets), sidechainExcluded, cacheSkipped)
+	fmt.Fprintf(stderr, "insights judge: 評価対象 %d 件（キャッシュ済み除外 %d 件）\n",
+		len(targets), plan.CacheSkipped)
 
 	if len(targets) == 0 {
 		result.DurationSeconds = time.Since(start).Seconds()
@@ -270,7 +269,7 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 		return result, err
 	}
 
-	evalResult, evalErr := evaluateSessions(ctx, evalDeps{
+	evalResult, evalErr := evaluateSessionsInPhases(ctx, evalDeps{
 		DB:            db,
 		Judge:         j,
 		Cfg:           cfg,
@@ -278,7 +277,7 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 		JudgeName:     j.Name(),
 		PromptVersion: prompts.PromptVersion,
 		Concurrency:   cfg.Judge.Concurrency,
-	}, targets, childrenByParent, costs, stderr)
+	}, targets, rows, plan, stderr)
 
 	result.Evaluated = len(evalResult.Succeeded)
 	result.Failed = len(evalResult.Failed)
@@ -455,9 +454,18 @@ func aggregateSessionCosts(rows []store.UsageRow) map[string]*sessionCostAgg {
 }
 
 // buildChildSummaries は IsSidechain な行を ParentSessionID ごとにまとめ、
-// judge.ChildSummary に変換する。方針どおり、サブエージェントは個別評価せず、
-// 親セッションの評価プロンプトに渡す要約としてのみ使う。
-func buildChildSummaries(rows []store.SessionRow, costs map[string]*sessionCostAgg) map[string][]judge.ChildSummary {
+// judge.ChildSummary に変換する。子セッションも個別に評価するが、その台本は親に渡さず、
+// 親の評価プロンプトにはこの要約（と子の評価結果）だけを載せる。
+//
+// 子の評価結果は promptVersion / ContentHash が一致するキャッシュから読む。まだ評価
+// されていない子は Evaluated が false のままになる（同じ実行の中で子を先に評価する
+// のは evaluateSessionsInPhases の役目）。
+func buildChildSummaries(
+	db *store.DB,
+	rows []store.SessionRow,
+	costs map[string]*sessionCostAgg,
+	promptVersion string,
+) (map[string][]judge.ChildSummary, error) {
 	out := map[string][]judge.ChildSummary{}
 	for _, r := range rows {
 		if !r.IsSidechain || strings.TrimSpace(r.ParentSessionID) == "" {
@@ -479,63 +487,74 @@ func buildChildSummaries(rows []store.SessionRow, costs map[string]*sessionCostA
 			cs.Priced = agg.AllKnown
 			cs.Models = agg.models()
 		}
+		if db != nil {
+			raw, ok, err := db.EvalFor(r.SessionID, promptVersion, r.ContentHash)
+			if err != nil {
+				return nil, fmt.Errorf("子セッションの評価の取得に失敗しました (%s): %w", r.SessionID, err)
+			}
+			if ok {
+				var ev model.Eval
+				// 壊れたキャッシュ 1 件で親の評価まで止める必要は無い。
+				// 読めなければ「未評価の子」として扱う。
+				if json.Unmarshal(raw, &ev) == nil {
+					cs.Evaluated = true
+					cs.Outcome = ev.Outcome
+					cs.OutcomeSummary = ev.OutcomeSummary
+					cs.ReworkOccurred = ev.Rework.Occurred
+				}
+			}
+		}
 		out[r.ParentSessionID] = append(out[r.ParentSessionID], cs)
 	}
-	return out
+	return out, nil
+}
+
+// evalPlan は prepareEvalTargets が組み立てた、この実行で評価すべきものの一式。
+type evalPlan struct {
+	// Targets は評価する対象（force で無ければキャッシュ済みを除いたもの）。
+	Targets []store.SessionRow
+	// CacheSkipped は評価済みとして除外した件数。
+	CacheSkipped int
+	// ChildrenByParent は親セッション ID ごとの委譲要約。
+	ChildrenByParent map[string][]judge.ChildSummary
+	// Costs はセッション ID ごとのコスト集計。
+	Costs map[string]*sessionCostAgg
 }
 
 // prepareEvalTargets は SessionsInRange/UsageInRange の結果から、評価すべきセッション一覧
-// （サブエージェントを除外し、force で無ければキャッシュ済みも除外したもの）と、
-// 委譲要約・コスト集計を組み立てる。
+// （force で無ければキャッシュ済みを除外したもの）と、委譲要約・コスト集計を組み立てる。
 //
-// 例外として、ワークツリー配下で動いたサブエージェントは個別に評価する
-// （evaluatableSidechain）。
+// サブエージェントも除外しない。委譲された作業は実データの 7 割を占め、そこを評価しない
+// ままにすると、その日に実際に動いた作業の大半が誰にも読まれずに消える。
 func prepareEvalTargets(
 	db *store.DB,
 	rows []store.SessionRow,
 	usageRows []store.UsageRow,
 	force bool,
 	promptVersion string,
-) (targets []store.SessionRow, sidechainExcluded, cacheSkipped int, childrenByParent map[string][]judge.ChildSummary, costs map[string]*sessionCostAgg, err error) {
-	costs = aggregateSessionCosts(usageRows)
-	childrenByParent = buildChildSummaries(rows, costs)
-
-	var candidates []store.SessionRow
-	for _, r := range rows {
-		if r.IsSidechain && !evaluatableSidechain(r) {
-			sidechainExcluded++
-			continue
-		}
-		candidates = append(candidates, r)
+) (*evalPlan, error) {
+	costs := aggregateSessionCosts(usageRows)
+	childrenByParent, err := buildChildSummaries(db, rows, costs, promptVersion)
+	if err != nil {
+		return nil, err
 	}
+	plan := &evalPlan{ChildrenByParent: childrenByParent, Costs: costs}
 
-	for _, r := range candidates {
+	for _, r := range rows {
 		if !force {
 			_, ok, evalErr := db.EvalFor(r.SessionID, promptVersion, r.ContentHash)
 			if evalErr != nil {
-				return nil, 0, 0, nil, nil, fmt.Errorf("評価キャッシュの確認に失敗しました (%s): %w", r.SessionID, evalErr)
+				return nil, fmt.Errorf("評価キャッシュの確認に失敗しました (%s): %w", r.SessionID, evalErr)
 			}
 			if ok {
-				cacheSkipped++
+				plan.CacheSkipped++
 				continue
 			}
 		}
-		targets = append(targets, r)
+		plan.Targets = append(plan.Targets, r)
 	}
 
-	return targets, sidechainExcluded, cacheSkipped, childrenByParent, costs, nil
-}
-
-// evaluatableSidechain は、サブエージェントでも個別に評価する例外かどうかを返す。
-//
-// サブエージェントを個別評価しないのは、実データの 7 割を占めるうえに 1 件あたりが
-// 小さく、評価しても具体的な行動に繋がりにくいため。ただしワークツリー
-// （<project>/.claude/worktree/<name>）で動いたものは事情が違う。ワークツリーは
-// 並列に本作業を進めるために切られるので、中身は「親の小さな下請け」ではなく
-// それ自体が 1 本の作業になる。親の「委譲 N 件」に埋めてしまうと、その日の実作業の
-// 大半が評価されないまま消える。
-func evaluatableSidechain(r store.SessionRow) bool {
-	return r.IsWorktreeSidechain()
+	return plan, nil
 }
 
 // --- AI 評価の実行 ---
@@ -549,6 +568,16 @@ type evalDeps struct {
 	JudgeName     string
 	PromptVersion string
 	Concurrency   int
+	// Progress は進捗表示の基準。子（サブエージェント）→ 親の 2 フェーズに分けて
+	// 評価するため、1 回の呼び出しの中だけでは「実行全体の何件目か」が分からない。
+	// ゼロ値ならそのフェーズの件数をそのまま全体として表示する。
+	Progress evalProgress
+}
+
+// evalProgress は 2 フェーズにまたがる進捗表示の基準。
+type evalProgress struct {
+	Done  int // このフェーズより前に処理済みの件数
+	Total int // 実行全体の対象件数
 }
 
 // evalRunResult は evaluateSessions の実行結果。
@@ -677,6 +706,97 @@ func recordEvalRun(deps evalDeps, rec store.EvalRunRecord) {
 	}
 }
 
+// evaluateSessionsInPhases は targets を「サブエージェント → 親」の 2 フェーズに分けて
+// 評価する。子の評価結果（達成度・手戻り・要約）は親の委譲要約に載せるので、親より先に
+// 子が評価されている必要がある。1 回の並行実行のままでは順序を保証できない。
+//
+// 子同士の親子関係（多段委譲）まではこの順序保証の対象にしない。同じフェーズの中では
+// 並行に走るため、子の子の評価は次回以降の実行でキャッシュ経由で載ることになる。
+func evaluateSessionsInPhases(
+	ctx context.Context,
+	deps evalDeps,
+	targets []store.SessionRow,
+	rows []store.SessionRow,
+	plan *evalPlan,
+	stderr io.Writer,
+) (*evalRunResult, error) {
+	var children, parents []store.SessionRow
+	for _, t := range targets {
+		if t.IsSidechain {
+			children = append(children, t)
+		} else {
+			parents = append(parents, t)
+		}
+	}
+
+	merged := &evalRunResult{}
+	if len(children) > 0 {
+		deps.Progress = evalProgress{Total: len(targets)}
+		r, err := evaluateSessions(ctx, deps, children, plan.ChildrenByParent, plan.Costs, stderr)
+		mergeEvalResult(merged, r)
+		if err != nil {
+			sortEvalResult(merged)
+			return merged, err
+		}
+	}
+
+	if len(parents) == 0 {
+		sortEvalResult(merged)
+		return merged, nil
+	}
+
+	// 子の評価がレート制限で打ち切られている状態で親を走らせても、同じ失敗が増えるだけ。
+	// 打ち切りの扱いは evaluateSessions の中と揃える（失敗として記録し、error は返さない）。
+	if merged.RateLimited {
+		for _, p := range parents {
+			merged.Failed = append(merged.Failed, evalFailure{SessionID: p.SessionID, Reason: errEvalAborted.Error()})
+		}
+		if stderr != nil {
+			fmt.Fprintf(stderr, "insights judge: レート制限のため親セッション %d 件は評価せずに打ち切りました\n", len(parents))
+		}
+		sortEvalResult(merged)
+		return merged, nil
+	}
+
+	// 子の評価が済んだので、委譲要約を組み直してから親を評価する。
+	childrenByParent := plan.ChildrenByParent
+	if len(children) > 0 {
+		rebuilt, err := buildChildSummaries(deps.DB, rows, plan.Costs, deps.PromptVersion)
+		if err != nil {
+			sortEvalResult(merged)
+			return merged, err
+		}
+		childrenByParent = rebuilt
+	}
+
+	deps.Progress = evalProgress{Done: len(children), Total: len(targets)}
+	r, err := evaluateSessions(ctx, deps, parents, childrenByParent, plan.Costs, stderr)
+	mergeEvalResult(merged, r)
+	sortEvalResult(merged)
+	return merged, err
+}
+
+// mergeEvalResult は後のフェーズの結果を先のフェーズの結果へ足し込む。
+func mergeEvalResult(dst, src *evalRunResult) {
+	if src == nil {
+		return
+	}
+	dst.Succeeded = append(dst.Succeeded, src.Succeeded...)
+	dst.Failed = append(dst.Failed, src.Failed...)
+	dst.RunSessionIDs = append(dst.RunSessionIDs, src.RunSessionIDs...)
+	dst.CostUSD += src.CostUSD
+	if src.RateLimited {
+		dst.RateLimited = true
+	}
+}
+
+// sortEvalResult はフェーズをまたいで連結した結果の並びを安定させる。
+func sortEvalResult(r *evalRunResult) {
+	sort.Strings(r.Succeeded)
+	sort.Slice(r.Failed, func(i, j int) bool { return r.Failed[i].SessionID < r.Failed[j].SessionID })
+	sort.Strings(r.RunSessionIDs)
+}
+
 // evaluateSessions は targets を並行に評価し、結果を直列に DB へ保存する。
 // 並行度は deps.Concurrency（cfg.Judge.Concurrency）を上限とするが、store は接続を
 // 直列化しているため（store.Open が SetMaxOpenConns(1) する）、DB 書き込み自体は
@@ -781,7 +901,11 @@ func evaluateSessions(
 		}
 		processed++
 		if stderr != nil {
-			fmt.Fprintf(stderr, "insights judge: %d/%d 件処理済み\n", processed, len(targets))
+			total := deps.Progress.Total
+			if total <= 0 {
+				total = len(targets)
+			}
+			fmt.Fprintf(stderr, "insights judge: %d/%d 件処理済み\n", deps.Progress.Done+processed, total)
 		}
 
 		if o.err != nil {
@@ -864,7 +988,6 @@ func renderJudgeHuman(w io.Writer, r *judgeResult) error {
 
 	fmt.Fprintf(w, "対象セッション（期間内合計）: %d 件\n", r.TotalSessions)
 	fmt.Fprintf(w, "除外（設定 exclude）: %d 件\n", r.ConfigExcluded)
-	fmt.Fprintf(w, "除外（サブエージェント）: %d 件\n", r.SidechainExcluded)
 	fmt.Fprintf(w, "除外（評価キャッシュ済み）: %d 件\n", r.CacheSkipped)
 	fmt.Fprintf(w, "評価対象: %d 件\n", r.Targeted)
 	fmt.Fprintln(w)

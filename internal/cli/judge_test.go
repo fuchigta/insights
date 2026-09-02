@@ -24,6 +24,7 @@ import (
 type fakeSessionJudge struct {
 	mu         sync.Mutex
 	calls      int
+	prompts    []string // 評価に渡された台本（順序込み）
 	failMarker string
 	outcome    string // 空なら "achieved"
 }
@@ -34,6 +35,7 @@ func (f *fakeSessionJudge) Available() error { return nil }
 func (f *fakeSessionJudge) Evaluate(_ context.Context, req judge.Request) (json.RawMessage, error) {
 	f.mu.Lock()
 	f.calls++
+	f.prompts = append(f.prompts, req.Prompt)
 	f.mu.Unlock()
 
 	if f.failMarker != "" && strings.Contains(req.Prompt, f.failMarker) {
@@ -52,7 +54,20 @@ func (f *fakeSessionJudge) callCount() int {
 	return f.calls
 }
 
-func TestPrepareEvalTargets_ExcludesSidechainAndBuildsChildSummary(t *testing.T) {
+// promptFor は marker を含む台本を返す（無ければ空文字）。どのセッションの評価かは
+// タイトルや最初の発話で見分ける。
+func (f *fakeSessionJudge) promptFor(marker string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, p := range f.prompts {
+		if strings.Contains(p, marker) {
+			return p
+		}
+	}
+	return ""
+}
+
+func TestPrepareEvalTargets_IncludesSidechainAndBuildsChildSummary(t *testing.T) {
 	db := newTempDB(t)
 	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
 
@@ -77,21 +92,25 @@ func TestPrepareEvalTargets_ExcludesSidechainAndBuildsChildSummary(t *testing.T)
 		t.Fatalf("UsageInRange() error = %v", err)
 	}
 
-	targets, sidechainExcluded, cacheSkipped, children, costs, err := prepareEvalTargets(db, rows, usageRows, false, "v1")
+	plan, err := prepareEvalTargets(db, rows, usageRows, false, "v1")
 	if err != nil {
 		t.Fatalf("prepareEvalTargets() error = %v", err)
 	}
 
-	if len(targets) != 1 || targets[0].SessionID != "parent-1" {
-		t.Fatalf("targets = %+v, want [parent-1]（サブエージェントは対象から除外されるはず）", targets)
+	// サブエージェントも個別評価の対象。委譲された作業は実データの大半を占めるため、
+	// ここを外すとその日に実際に動いた作業のほとんどが評価されないまま消える。
+	got := map[string]bool{}
+	for _, r := range plan.Targets {
+		got[r.SessionID] = true
 	}
-	if sidechainExcluded != 1 {
-		t.Errorf("sidechainExcluded = %d, want 1", sidechainExcluded)
+	if len(plan.Targets) != 2 || !got["parent-1"] || !got["child-1"] {
+		t.Fatalf("targets = %+v, want [parent-1 child-1]", plan.Targets)
 	}
-	if cacheSkipped != 0 {
-		t.Errorf("cacheSkipped = %d, want 0", cacheSkipped)
+	if plan.CacheSkipped != 0 {
+		t.Errorf("CacheSkipped = %d, want 0", plan.CacheSkipped)
 	}
 
+	children, costs := plan.ChildrenByParent, plan.Costs
 	kids, ok := children["parent-1"]
 	if !ok || len(kids) != 1 {
 		t.Fatalf("children[parent-1] = %+v, want 1 件", kids)
@@ -132,32 +151,32 @@ func TestPrepareEvalTargets_CacheSkipAndForce(t *testing.T) {
 		t.Fatalf("UsageInRange() error = %v", err)
 	}
 
-	targets, _, cacheSkipped, _, _, err := prepareEvalTargets(db, rows, usageRows, false, "v1")
+	plan, err := prepareEvalTargets(db, rows, usageRows, false, "v1")
 	if err != nil {
 		t.Fatalf("prepareEvalTargets() 1回目 error = %v", err)
 	}
-	if len(targets) != 1 || cacheSkipped != 0 {
-		t.Fatalf("1回目: targets=%d cacheSkipped=%d, want 1, 0", len(targets), cacheSkipped)
+	if len(plan.Targets) != 1 || plan.CacheSkipped != 0 {
+		t.Fatalf("1回目: targets=%d cacheSkipped=%d, want 1, 0", len(plan.Targets), plan.CacheSkipped)
 	}
 
-	if err := db.SaveEval("sess-1", "fake-judge", "claude-sonnet-5", "v1", targets[0].ContentHash, validEvalJSON("achieved"), store.EvalRun{}); err != nil {
+	if err := db.SaveEval("sess-1", "fake-judge", "claude-sonnet-5", "v1", plan.Targets[0].ContentHash, validEvalJSON("achieved"), store.EvalRun{}); err != nil {
 		t.Fatalf("SaveEval() error = %v", err)
 	}
 
-	targets2, _, cacheSkipped2, _, _, err := prepareEvalTargets(db, rows, usageRows, false, "v1")
+	plan2, err := prepareEvalTargets(db, rows, usageRows, false, "v1")
 	if err != nil {
 		t.Fatalf("prepareEvalTargets() 2回目 error = %v", err)
 	}
-	if len(targets2) != 0 || cacheSkipped2 != 1 {
-		t.Fatalf("2回目（force=false）: targets=%d cacheSkipped=%d, want 0, 1（キャッシュが効くはず）", len(targets2), cacheSkipped2)
+	if len(plan2.Targets) != 0 || plan2.CacheSkipped != 1 {
+		t.Fatalf("2回目（force=false）: targets=%d cacheSkipped=%d, want 0, 1（キャッシュが効くはず）", len(plan2.Targets), plan2.CacheSkipped)
 	}
 
-	targets3, _, cacheSkipped3, _, _, err := prepareEvalTargets(db, rows, usageRows, true, "v1")
+	plan3, err := prepareEvalTargets(db, rows, usageRows, true, "v1")
 	if err != nil {
 		t.Fatalf("prepareEvalTargets() --force error = %v", err)
 	}
-	if len(targets3) != 1 || cacheSkipped3 != 0 {
-		t.Fatalf("--force: targets=%d cacheSkipped=%d, want 1, 0（force はキャッシュを無視するはず）", len(targets3), cacheSkipped3)
+	if len(plan3.Targets) != 1 || plan3.CacheSkipped != 0 {
+		t.Fatalf("--force: targets=%d cacheSkipped=%d, want 1, 0（force はキャッシュを無視するはず）", len(plan3.Targets), plan3.CacheSkipped)
 	}
 }
 

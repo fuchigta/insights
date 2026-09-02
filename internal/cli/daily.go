@@ -66,21 +66,20 @@ func newDailyCommand() *cobra.Command {
 
 // dailyResult は `insights daily` の実行結果全体。--json ではこの構造体をそのまま出す。
 type dailyResult struct {
-	Date              string   `json:"date"`
-	NoSessions        bool     `json:"no_sessions"`
-	SkippedJudge      bool     `json:"skipped_judge"`   // --no-judge 指定時 true
-	ConfigExcluded    int      `json:"config_excluded"` // exclude.projects / exclude.entrypoints で除外した件数
-	SidechainExcluded int      `json:"sidechain_excluded"`
-	JudgeEvaluated    int      `json:"judge_evaluated"`
-	JudgeFailed       int      `json:"judge_failed"`
-	JudgeCostUSD      float64  `json:"judge_cost_usd"`
-	JudgeSessionIDs   []string `json:"judge_session_ids,omitempty"`
-	TotalSessions     int      `json:"total_sessions"`
-	TotalCostUSD      float64  `json:"total_cost_usd"`
-	DailyPath         string   `json:"daily_path,omitempty"`
-	RetroPath         string   `json:"retro_path,omitempty"`
-	ProposalCount     int      `json:"proposal_count"`
-	DurationSeconds   float64  `json:"duration_seconds"`
+	Date            string   `json:"date"`
+	NoSessions      bool     `json:"no_sessions"`
+	SkippedJudge    bool     `json:"skipped_judge"`   // --no-judge 指定時 true
+	ConfigExcluded  int      `json:"config_excluded"` // exclude.projects / exclude.entrypoints で除外した件数
+	JudgeEvaluated  int      `json:"judge_evaluated"`
+	JudgeFailed     int      `json:"judge_failed"`
+	JudgeCostUSD    float64  `json:"judge_cost_usd"`
+	JudgeSessionIDs []string `json:"judge_session_ids,omitempty"`
+	TotalSessions   int      `json:"total_sessions"`
+	TotalCostUSD    float64  `json:"total_cost_usd"`
+	DailyPath       string   `json:"daily_path,omitempty"`
+	RetroPath       string   `json:"retro_path,omitempty"`
+	ProposalCount   int      `json:"proposal_count"`
+	DurationSeconds float64  `json:"duration_seconds"`
 }
 
 // runDailyCommand は daily サブコマンドの本体（cobra RunE から呼ばれる）。
@@ -194,12 +193,12 @@ func runDaily(
 	evalEstimate := 0.0
 	evalFromActual := 0
 	if !noJudge {
-		pre, _, _, _, _, prepErr := prepareEvalTargets(db, rows, usageRows, false, prompts.PromptVersion)
+		pre, prepErr := prepareEvalTargets(db, rows, usageRows, false, prompts.PromptVersion)
 		if prepErr != nil {
 			return nil, prepErr
 		}
-		pendingEvals = len(pre)
-		evalEstimate, evalFromActual = estimator.estimateTargets(pre)
+		pendingEvals = len(pre.Targets)
+		evalEstimate, evalFromActual = estimator.estimateTargets(pre.Targets)
 	}
 	aiCalls := pendingEvals + synthesizeCallCount
 	label := fmt.Sprintf("AI 呼び出し（セッション評価 %d 件 + 日報・振り返りの生成 %d 回）", pendingEvals, synthesizeCallCount)
@@ -215,21 +214,15 @@ func runDaily(
 
 	if noJudge {
 		result.SkippedJudge = true
-		// サブエージェント件数の表示のためだけに絞り込みを行う（評価は実行しない）。
-		_, sidechainExcluded, _, _, _, prepErr := prepareEvalTargets(db, rows, usageRows, false, prompts.PromptVersion)
-		if prepErr == nil {
-			result.SidechainExcluded = sidechainExcluded
-		}
 	} else {
-		targets, sidechainExcluded, _, childrenByParent, costs, prepErr := prepareEvalTargets(db, rows, usageRows, false, prompts.PromptVersion)
+		plan, prepErr := prepareEvalTargets(db, rows, usageRows, false, prompts.PromptVersion)
 		if prepErr != nil {
 			return nil, prepErr
 		}
-		result.SidechainExcluded = sidechainExcluded
 
-		if len(targets) > 0 {
-			fmt.Fprintf(stderr, "insights daily: 未評価セッション %d 件を評価します\n", len(targets))
-			evalResult, evalErr := evaluateSessions(ctx, evalDeps{
+		if len(plan.Targets) > 0 {
+			fmt.Fprintf(stderr, "insights daily: 未評価セッション %d 件を評価します\n", len(plan.Targets))
+			evalResult, evalErr := evaluateSessionsInPhases(ctx, evalDeps{
 				DB:            db,
 				Judge:         j,
 				Cfg:           cfg,
@@ -237,7 +230,7 @@ func runDaily(
 				JudgeName:     j.Name(),
 				PromptVersion: prompts.PromptVersion,
 				Concurrency:   cfg.Judge.Concurrency,
-			}, targets, childrenByParent, costs, stderr)
+			}, plan.Targets, rows, plan, stderr)
 
 			if evalResult != nil {
 				result.JudgeEvaluated = len(evalResult.Succeeded)
@@ -446,7 +439,7 @@ func renderDailyHuman(w io.Writer, r *dailyResult) error {
 	if r.SkippedJudge {
 		fmt.Fprintln(w, "評価: --no-judge によりスキップしました")
 	} else {
-		fmt.Fprintf(w, "評価: 成功 %d 件, 失敗 %d 件（サブエージェント除外 %d 件）\n", r.JudgeEvaluated, r.JudgeFailed, r.SidechainExcluded)
+		fmt.Fprintf(w, "評価: 成功 %d 件, 失敗 %d 件\n", r.JudgeEvaluated, r.JudgeFailed)
 		fmt.Fprintf(w, "評価コスト（今回発生分）: $%.4f\n", r.JudgeCostUSD)
 	}
 	fmt.Fprintln(w)

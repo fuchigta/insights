@@ -67,6 +67,9 @@ type ProjectStat struct {
 
 	// 以下はプロジェクト単位の振り返りのために持つ。日次全体の分布だけでは
 	// 「どのプロジェクトで何が起きたか」が分からず、改善行動に繋がらないため。
+	// EvaluatedSessions は Facets に反映したセッション数。サブエージェントは
+	// 評価していても含まない（Facets のコメントを参照）。Sessions との差は
+	// 「評価漏れ」ではなく、大半がサブエージェントである。
 	EvaluatedSessions int    `json:"evaluated_sessions"`
 	Facets            Facets `json:"facets"`
 	// AchievedRatio は achieved / 評価済み。評価が 0 件なら -1（0% と区別する）。
@@ -133,6 +136,10 @@ type SessionCard struct {
 
 // Facets は評価軸ごとの分布。列挙値をキーにした件数で持つ。
 // 軸を増やしてもこの形のままレポート側が対応できるよう、map で持つ。
+//
+// 集計に入れるのはユーザーが直接回したセッションだけで、サブエージェント
+// （sidechain）は評価していても入れない。この分布は「ユーザーの任せ方」を表す
+// ものであり、AI がスポーンした子の実行内訳を混ぜると意味が変わってしまうため。
 type Facets struct {
 	Outcome          map[string]int `json:"outcome"`           // achieved / partial / abandoned / exploratory
 	ArtifactValue    map[string]int `json:"artifact_value"`    // durable / transient / none

@@ -25,7 +25,7 @@ var retroPromptTemplate string
 // 規約: これらのプロンプトの内容を変更したら、必ずこの値も変更すること。
 // 生成物の解釈（JSON スキーマ・観点）が変わった過去の Daily と新しいプロンプトの結果を
 // 混同しないようにするための目印であり、呼び出し側が Meta やキャッシュキーに使うことを想定する。
-const PromptVersion = "rollup-synth-v7"
+const PromptVersion = "rollup-synth-v8"
 
 // dailySchema は日報生成に期待する出力の JSON Schema。
 // internal/judge のバックエンドが `claude -p --json-schema` にそのまま渡せるよう、
@@ -74,7 +74,7 @@ var retroSchema = json.RawMessage(`{
 		},
 		"body": {
 			"type": "string",
-			"description": "Markdown 形式の本文。プロジェクト個別の当たり外れは project_reviews に譲り、任せ方・モデル選択と委譲・検収の傾向など日を横断する所見のみを書く。ユーザーの行動と AI の行動を区別し、対話実行と非対話実行（自動実行）も混ぜずに書く。"
+			"description": "Markdown 形式の本文。プロジェクト個別の当たり外れは project_reviews に譲り、任せ方・モデルと effort の選び方・検収の傾向など日を横断する所見のみを書く。ユーザーの行動と AI の行動を区別し、対話実行と非対話実行（自動実行）も混ぜずに書く。"
 		},
 		"cost_observation": {
 			"type": "string",
@@ -91,7 +91,7 @@ var retroSchema = json.RawMessage(`{
 					"title": {"type": "string"},
 					"detail": {
 						"type": "string",
-						"description": "後から実行有無を客観的に判定できる具体的な内容。ユーザーの任せ方（依頼の仕方・作業の分け方・モデルと effort の選び方・委譲の仕方・検収の仕方）として書くこと。非対話実行（execution_mode が automated）については、起動時のプロンプトか、そこから呼び出しているスキル／スラッシュコマンドの定義に何を書き足すかとして書くこと（実行中の介入や検収を求める提案は実行不可能なので書かない）。「もっと丁寧にやる」のような検証不能な精神論と、insights 自体への機能要望は禁止。"
+						"description": "後から実行有無を客観的に判定できる具体的な内容。ユーザーの任せ方（依頼の仕方・作業の分け方・モデルと effort の選び方・セッションの成果物の検収の仕方）として書くこと。サブエージェントの成果の検収を求める提案は書かない（スポーンしたのはメインセッションの AI であり、ユーザーに打ち手が無い。委譲について書けるのは最初の依頼に前提・完了条件・触ってよい範囲を書いておく形だけ）。非対話実行（execution_mode が automated）については、起動時のプロンプトか、そこから呼び出しているスキル／スラッシュコマンドの定義に何を書き足すかとして書くこと（実行中の介入や検収を求める提案は実行不可能なので書かない）。「もっと丁寧にやる」のような検証不能な精神論と、insights 自体への機能要望は禁止。"
 					},
 					"category": {"type": "string"}
 				}

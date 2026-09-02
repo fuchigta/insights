@@ -276,26 +276,28 @@ func TestIntegration_IngestJudgeDailyReportActions(t *testing.T) {
 		if err := json.Unmarshal(outBuf.Bytes(), &judgeRes); err != nil {
 			t.Fatalf("judge stdout の JSON デコードに失敗しました: %v\nstdout=%s", err, outBuf.String())
 		}
-		// 継ぎ目: サブエージェントは個別評価の対象から除外され、親セッションだけが
-		// 評価されること（prepareEvalTargets によるサイドチェーン除外）。
-		if judgeRes.SidechainExcluded != 1 {
-			t.Errorf("SidechainExcluded = %d, want 1", judgeRes.SidechainExcluded)
-		}
-		if judgeRes.Evaluated != 1 || judgeRes.Failed != 0 {
-			t.Errorf("Evaluated/Failed = %d/%d, want 1/0: %+v", judgeRes.Evaluated, judgeRes.Failed, judgeRes)
+		// 継ぎ目: 親もサブエージェントも個別に評価されること。
+		if judgeRes.Evaluated != 2 || judgeRes.Failed != 0 {
+			t.Errorf("Evaluated/Failed = %d/%d, want 2/0: %+v", judgeRes.Evaluated, judgeRes.Failed, judgeRes)
 		}
 	}
 
-	// 継ぎ目: サブエージェント（sidechain）を個別評価せず、親セッションの評価プロンプト
-	// に委譲の要約として畳み込むこと（buildChildSummaries -> judge.BuildSessionPrompt の
-	// 受け渡し）。.meta.json の description がプロンプト本文に現れているかで確認する。
+	// 継ぎ目: サブエージェント（sidechain）の要約を親セッションの評価プロンプトへ渡すこと
+	// （buildChildSummaries -> judge.BuildSessionPrompt の受け渡し）。.meta.json の
+	// description がプロンプト本文に現れているかで確認する。
 	fj.mu.Lock()
-	if len(fj.sessionPrompts) != 1 {
-		t.Fatalf("sessionPrompts の件数 = %d, want 1（親セッションのみ評価されるはず）", len(fj.sessionPrompts))
+	if len(fj.sessionPrompts) != 2 {
+		t.Fatalf("sessionPrompts の件数 = %d, want 2（親とサブエージェントの両方）", len(fj.sessionPrompts))
 	}
-	if !strings.Contains(fj.sessionPrompts[0], subagentDescription) {
-		t.Errorf("親セッションの評価プロンプトにサブエージェントの要約（%q）が含まれていない。"+
-			"サブエージェントのログが親の評価に畳み込まれていない可能性がある", subagentDescription)
+	foundDelegation := false
+	for _, prompt := range fj.sessionPrompts {
+		if strings.Contains(prompt, subagentDescription) {
+			foundDelegation = true
+		}
+	}
+	if !foundDelegation {
+		t.Errorf("どの評価プロンプトにもサブエージェントの要約（%q）が含まれていない。"+
+			"サブエージェントのログが親の評価に渡っていない可能性がある", subagentDescription)
 	}
 	fj.mu.Unlock()
 
@@ -353,8 +355,8 @@ func TestIntegration_IngestJudgeDailyReportActions(t *testing.T) {
 		t.Errorf("daily.JudgeEvaluated = %d, want 0（judge 段階のキャッシュが効くはず）", dailyRes.JudgeEvaluated)
 	}
 	fj.mu.Lock()
-	if len(fj.sessionPrompts) != 1 {
-		t.Errorf("daily 実行後の sessionPrompts の件数 = %d, want 1（再評価されていないはず）", len(fj.sessionPrompts))
+	if len(fj.sessionPrompts) != 2 {
+		t.Errorf("daily 実行後の sessionPrompts の件数 = %d, want 2（judge 段階の 2 件のまま増えていないはず）", len(fj.sessionPrompts))
 	}
 	if fj.dailyCalls != 1 || fj.retroCalls != 1 {
 		t.Errorf("dailyCalls/retroCalls = %d/%d, want 1/1", fj.dailyCalls, fj.retroCalls)

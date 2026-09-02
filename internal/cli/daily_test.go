@@ -183,17 +183,14 @@ func TestDaily_WritesTwoMarkdownFilesAndExcludesSidechain(t *testing.T) {
 	if result.NoSessions {
 		t.Fatal("NoSessions = true, want false（セッションがあるはず）")
 	}
-	if result.SidechainExcluded != 1 {
-		t.Errorf("SidechainExcluded = %d, want 1", result.SidechainExcluded)
-	}
-	if result.JudgeEvaluated != 1 {
-		t.Errorf("JudgeEvaluated = %d, want 1（親セッションのみ評価されるはず）", result.JudgeEvaluated)
+	if result.JudgeEvaluated != 2 {
+		t.Errorf("JudgeEvaluated = %d, want 2（親もサブエージェントも評価されるはず）", result.JudgeEvaluated)
 	}
 	if result.JudgeFailed != 0 {
 		t.Errorf("JudgeFailed = %d, want 0", result.JudgeFailed)
 	}
-	if fj.sessionCalls != 1 {
-		t.Errorf("fakeDailyJudge.sessionCalls = %d, want 1（サブエージェントは評価されないはず）", fj.sessionCalls)
+	if fj.sessionCalls != 2 {
+		t.Errorf("fakeDailyJudge.sessionCalls = %d, want 2（サブエージェントも個別に評価されるはず）", fj.sessionCalls)
 	}
 	if fj.nonSessionCalls != 2 {
 		t.Errorf("fakeDailyJudge.nonSessionCalls = %d, want 2（日報・振り返りで1回ずつ）", fj.nonSessionCalls)
