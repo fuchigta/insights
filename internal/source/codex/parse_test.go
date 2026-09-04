@@ -192,6 +192,70 @@ func TestParse_UsageWithoutAssistantMessage(t *testing.T) {
 	}
 }
 
+// TestParse_UsageFromEventMsgTokenCount は、token_usage_record を書かない版の Codex
+// （event_msg(type=token_count) にしか使用量が来ない）でも使用量を取りこぼさないことを
+// 確かめる。total_token_usage（累積）ではなく last_token_usage（直近1レスポンス分）を
+// 使うことも合わせて確認する（total を使うと二重・三重に数えてしまう）。
+func TestParse_UsageFromEventMsgTokenCount(t *testing.T) {
+	body := `{"timestamp":"2026-08-30T10:00:00Z","type":"session_meta","payload":{"id":"sess-1","session_id":"sess-1","timestamp":"2026-08-30T10:00:00Z","cwd":"/w","source":"cli"}}
+{"timestamp":"2026-08-30T10:00:01Z","type":"turn_context","payload":{"cwd":"/w","model":"gpt-5.5","effort":"medium"}}
+{"timestamp":"2026-08-30T10:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"バグを直して"}]}}
+{"timestamp":"2026-08-30T10:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"直しました"}]}}
+{"timestamp":"2026-08-30T10:00:04Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":9999,"cached_input_tokens":9999,"output_tokens":9999,"reasoning_output_tokens":9999,"total_tokens":9999},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":400,"cache_write_input_tokens":100,"output_tokens":200,"reasoning_output_tokens":50,"total_tokens":1200},"model_context_window":200000},"rate_limits":null}}
+`
+	sess := parseBody(t, body)
+
+	var withUsage []model.Message
+	for _, m := range sess.Messages {
+		if m.Usage != nil {
+			withUsage = append(withUsage, m)
+		}
+	}
+	if len(withUsage) != 1 {
+		t.Fatalf("Usage を持つ発話 = %d 件, want 1 件: %+v", len(withUsage), sess.Messages)
+	}
+
+	m := withUsage[0]
+	if m.Text != "直しました" {
+		t.Errorf("Usage が載った発話 = %q, want 直しました", m.Text)
+	}
+	got := *m.Usage
+	want := model.Usage{
+		InputTokens:     600, // last_token_usage の 1000 - 400（キャッシュ読み取り分）。total は無視する
+		OutputTokens:    200,
+		ThinkingTokens:  50,
+		CacheRead:       400,
+		CacheCreation5m: 100,
+	}
+	if got != want {
+		t.Errorf("Usage = %+v, want %+v（total_token_usage を使ってしまっている可能性）", got, want)
+	}
+}
+
+// TestParse_EventMsgTokenCountIgnoredWhenDedicatedRecordExists は、
+// token_usage_record と event_msg(type=token_count) の両方を書くロールアウト（新しめの
+// Codex）で、同じレスポンスの使用量を二重に数えないことを確かめる。
+func TestParse_EventMsgTokenCountIgnoredWhenDedicatedRecordExists(t *testing.T) {
+	body := `{"timestamp":"2026-08-30T10:00:00Z","type":"session_meta","payload":{"id":"sess-1","session_id":"sess-1","timestamp":"2026-08-30T10:00:00Z","cwd":"/w","source":"cli"}}
+{"timestamp":"2026-08-30T10:00:01Z","type":"turn_context","payload":{"cwd":"/w","model":"gpt-5.5","effort":"medium"}}
+{"timestamp":"2026-08-30T10:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"バグを直して"}]}}
+{"timestamp":"2026-08-30T10:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"直しました"}]}}
+{"timestamp":"2026-08-30T10:00:04Z","type":"token_usage_record","payload":{"usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":200,"reasoning_output_tokens":50}}}
+{"timestamp":"2026-08-30T10:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":200,"reasoning_output_tokens":50,"total_tokens":1200},"last_token_usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":200,"reasoning_output_tokens":50,"total_tokens":1200}}}}
+`
+	sess := parseBody(t, body)
+
+	var withUsage []model.Message
+	for _, m := range sess.Messages {
+		if m.Usage != nil {
+			withUsage = append(withUsage, m)
+		}
+	}
+	if len(withUsage) != 1 {
+		t.Fatalf("Usage を持つ発話 = %d 件, want 1 件（token_usage_record と event_msg の二重計上）: %+v", len(withUsage), sess.Messages)
+	}
+}
+
 // TestParse_SubAgentSource は、サブエージェントのロールアウトを親に畳み込めるよう
 // IsSidechain と ParentSessionID が立つことを確かめる。
 func TestParse_SubAgentSource(t *testing.T) {

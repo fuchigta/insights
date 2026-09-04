@@ -87,6 +87,20 @@ type compactedItem struct {
 	Message string `json:"message"`
 }
 
+// eventMsgEnvelope は type="event_msg" の payload の外側だけを見る。
+// EventMsg は内部タグ付き列挙（Rust 側 #[serde(tag = "type")]）で、type の値ごとに
+// 中身の形が変わる。ここでは token_count（使用量）だけを使うので、他の変種は
+// Type だけ見て捨てる（Info は type=="token_count" のときしか埋まらない）。
+type eventMsgEnvelope struct {
+	Type string          `json:"type"`
+	Info *tokenCountInfo `json:"info"`
+}
+
+// tokenCountInfo は event_msg(type="token_count").info（TokenUsageInfo）のうち使う項目。
+type tokenCountInfo struct {
+	LastTokenUsage codexUsage `json:"last_token_usage"`
+}
+
 // responseItem は type="response_item" の payload。Codex の ResponseItem に対応し、
 // 会話本文・ツール呼び出し・ツール結果がすべてここに来る。
 // 種類によって使うフィールドが変わるため、必要なものを 1 つの構造体に集めている。
@@ -132,7 +146,17 @@ func (s *Source) Parse(ref source.Ref) (*model.Session, error) {
 	}
 	defer rc.Close()
 
-	scanner := bufio.NewScanner(rc)
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, fmt.Errorf("ロールアウトの読み取りに失敗しました (%s): %w", ref.Path, err)
+	}
+
+	// event_msg(type=token_count) からの使用量取り込み（下記 "event_msg" ケース）は、
+	// token_usage_record が無いロールアウト専用のフォールバックにする。両方が書かれている
+	// ロールアウト（新しめの Codex）で両方を拾うと、同じレスポンスの使用量を二重に数える。
+	hasDedicatedUsageRecords := bytes.Contains(data, []byte(`"token_usage_record"`))
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 64*1024), maxScanBufferBytes)
 
 	sess := &model.Session{
@@ -263,11 +287,34 @@ func (s *Source) Parse(ref source.Ref) (*model.Session, error) {
 				IsMeta:    true,
 			}})
 
+		case "event_msg":
+			// event_msg は本来、legacy 履歴モードのロールアウトで response_item と同じ発話を
+			// もう一度書く経路（取り込むと会話が二重になる）だが、type=token_count のものだけは
+			// 例外で、token_usage_record が無い版の Codex ではここにしか使用量が来ない
+			// （codex-rs の rollout/policy.rs は token_count を常に永続化対象にしている）。
+			if hasDedicatedUsageRecords {
+				// 両方あるロールアウトでは token_usage_record 側だけを正とし、二重計上を避ける。
+				continue
+			}
+			var em eventMsgEnvelope
+			if err := json.Unmarshal(rec.Payload, &em); err != nil {
+				slog.Warn("codex: event_msg の解析に失敗しました", "path", ref.Path, "line", lineNo, "error", err)
+				continue
+			}
+			if em.Type != "token_count" || em.Info == nil {
+				continue
+			}
+			// last_token_usage は「直近 1 レスポンス分の使用量」（total_token_usage は
+			// セッション開始からの累積）。TokenUsageRecord.usage と同じ粒度なので、
+			// 同じ attachUsage にそのまま渡せる。
+			if extra := attachUsage(sess, convertUsage(em.Info.LastTokenUsage), curModel, curEffort, ts); extra != nil {
+				extra.Seq = seq
+				seq++
+				sess.Messages = append(sess.Messages, *extra)
+			}
+
 		default:
-			// event_msg / world_state / security_risk_score / realtime_item などは
-			// 正規化対象外。特に event_msg は、legacy 履歴モードのロールアウトで
-			// response_item と同じ発話をもう一度書く経路なので、取り込むと会話が
-			// 二重になる。本文は response_item だけから作る。
+			// world_state / security_risk_score / realtime_item などは正規化対象外。
 		}
 	}
 	if err := scanner.Err(); err != nil {
