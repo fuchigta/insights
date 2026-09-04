@@ -358,6 +358,19 @@ func (d *DB) LastIngestAt() (time.Time, error) {
 	return parseUTCString(s.String)
 }
 
+// HasIngestedSource は source が一度でも ingest_state に記録されたことがあるかを返す。
+// 増分取り込みの基準時刻（LastIngestAt、全ソース共通）を、後から有効化したソースに
+// そのまま適用すると、そのソースの過去ログが「基準時刻より前」として黙って取りこぼされる
+// （既存ソースの利用歴だけを見て「前回取り込み以降」が決まるため）。呼び出し側はこれを見て、
+// 記録が無いソースだけ基準時刻をゼロ値に戻し、初回は必ず全件取り込ませる。
+func (d *DB) HasIngestedSource(source string) (bool, error) {
+	var exists int
+	if err := d.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM ingest_state WHERE source = ?)`, source).Scan(&exists); err != nil {
+		return false, fmt.Errorf("ingest_state(%s) の確認に失敗: %w", source, err)
+	}
+	return exists != 0, nil
+}
+
 // --- 評価キャッシュ ---
 
 // SaveEval は判定結果を (session_id, prompt_version) 単位でキャッシュする。

@@ -238,7 +238,11 @@ func ingestRun(cmd *cobra.Command, cfg *config.Config, opts ingestOptions) (*ing
 		// 「取り込み対象が 0 件」の理由が分からないと利用者は設定を疑いようがない。
 		fmt.Fprintf(cmd.ErrOrStderr(), "insights ingest: ログ置き場が見つからないソースを飛ばしました: %s\n", s)
 	}
-	refs, err := discoverRefs(sources, since)
+	sinceBySource, err := sourceSinceMap(db, sources, since, mode)
+	if err != nil {
+		return nil, err
+	}
+	refs, err := discoverRefs(sources, sinceBySource)
 	if err != nil {
 		return nil, err
 	}
@@ -491,9 +495,9 @@ func buildSources(cfg *config.Config) (map[string]source.Source, []string, error
 	return out, skipped, nil
 }
 
-// discoverRefs は sources 全てを since 以降で Discover し、結果を結合する。
+// discoverRefs は sources 全てをそれぞれの since 以降で Discover し、結果を結合する。
 // ソース名でソートしてから走査するため、複数ソースがある場合でも結果の並びは決定的。
-func discoverRefs(sources map[string]source.Source, since time.Time) ([]source.Ref, error) {
+func discoverRefs(sources map[string]source.Source, sinceBySource map[string]time.Time) ([]source.Ref, error) {
 	names := make([]string, 0, len(sources))
 	for name := range sources {
 		names = append(names, name)
@@ -502,13 +506,39 @@ func discoverRefs(sources map[string]source.Source, since time.Time) ([]source.R
 
 	var all []source.Ref
 	for _, name := range names {
-		refs, err := sources[name].Discover(since)
+		refs, err := sources[name].Discover(sinceBySource[name])
 		if err != nil {
 			return nil, fmt.Errorf("%s のログ発見に失敗しました: %w", name, err)
 		}
 		all = append(all, refs...)
 	}
 	return all, nil
+}
+
+// sourceSinceMap は Discover に渡す基準時刻をソースごとに決める。
+//
+// resolveSince が返す since は全ソース共通の「最後に何かを取り込んだ時刻」で、
+// mode == "incremental" のとき使われる。これをそのまま新しく有効化したソースにも
+// 適用すると、そのソースの過去ログは「基準時刻より前」として Discover の時点で
+// 黙って除外される（除外プロジェクトやパース失敗と違い件数にも出ない）。
+// ingest_state に一度もそのソースの記録が無ければ、基準時刻をゼロ値に戻して
+// 初回は必ず全件を対象にする。
+func sourceSinceMap(db *store.DB, sources map[string]source.Source, since time.Time, mode string) (map[string]time.Time, error) {
+	out := make(map[string]time.Time, len(sources))
+	for name := range sources {
+		s := since
+		if mode == "incremental" && !s.IsZero() {
+			has, err := db.HasIngestedSource(name)
+			if err != nil {
+				return nil, err
+			}
+			if !has {
+				s = time.Time{}
+			}
+		}
+		out[name] = s
+	}
+	return out, nil
 }
 
 // appendUnique は values に s が無ければ追加する（未知モデルの重複警告を防ぐ）。

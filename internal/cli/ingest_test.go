@@ -505,6 +505,92 @@ func TestIngest_MissingCodexRootIsSkipped(t *testing.T) {
 	}
 }
 
+// TestIngest_NewlyAvailableSourceBackfillsPastLogs は、claude-code だけを継続的に
+// ingest してきた環境で codex を初めて使い始めたケースを再現する。
+//
+// 増分取り込みの基準時刻は全ソース共通で「最後に何かを取り込んだ時刻（ingest_state の
+// MAX(ingested_at)）」から決まる。1 回目の実行（claude-code のみ）でこの時刻が進んだ後、
+// 2 回目の実行までに codex のログ置き場が現れても、そのロールアウトの mtime は
+// 1 回目の基準時刻より古い（Codex を使い始めたのは insights を使い始めるより前、という
+// よくある順序）。ソース単位で「まだ一度も取り込んでいない」を見て基準時刻をゼロ値に
+// 戻さないと、この codex ログは Discover の時点で黙って除外され、発見数にすら
+// 現れないまま取りこぼされる。
+func TestIngest_NewlyAvailableSourceBackfillsPastLogs(t *testing.T) {
+	tmp := t.TempDir()
+	fakeClaudeHome := filepath.Join(tmp, "claude")
+	fakeCodexHome := filepath.Join(tmp, "codex")
+	configPath := filepath.Join(tmp, "config.yaml")
+	dbPath := filepath.Join(tmp, "insights.db")
+	proj := filepath.Join(tmp, "proj-a")
+
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	writeValidSession(t, filepath.Join(fakeClaudeHome, "projects", "proj-a-slug", "11111111-1111-1111-1111-111111111111.jsonl"),
+		"11111111-1111-1111-1111-111111111111", proj, base)
+
+	cfg := config.Default()
+	cfg.Sources.ClaudeCode.Root = fakeClaudeHome
+	cfg.Sources.Codex.Root = fakeCodexHome // まだ sessions/ を作っていないので Available() が false
+	cfg.Evidence.Git = false
+	cfg.Evidence.Gh = config.TristateFalse
+	cfg.Evidence.Glab = config.TristateFalse
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("cfg.Save: %v", err)
+	}
+
+	// 1 回目: claude-code だけが ingest され、ingest_state の最終取り込み時刻が
+	// 「現在時刻」に進む。この時点では codex のログ置き場自体が存在しない。
+	if _, stderr, err := runIngestCLI(t, configPath, dbPath, "--no-evidence"); err != nil {
+		t.Fatalf("1回目の ingest error = %v\nstderr=%s", err, stderr)
+	}
+	if ids := allSessionIDs(t, dbPath); len(ids) != 1 {
+		t.Fatalf("1回目取り込み後のセッション数 = %d, want 1: %v", len(ids), ids)
+	}
+
+	// ここで初めて Codex を使い始めたことにする。ロールアウトの mtime は
+	// 1 回目の取り込み時刻より明確に過去にする（Chtimes しないと「今作った」扱いに
+	// なってしまい、再現したいずれ違いが出ない）。
+	codexTS := base.Add(time.Hour)
+	writeCodexRollout(t, fakeCodexHome, "99999999-9999-9999-9999-999999999999", proj, codexTS)
+	rolloutPath := filepath.Join(fakeCodexHome, "sessions", codexTS.Format("2006"), codexTS.Format("01"), codexTS.Format("02"),
+		"rollout-"+codexTS.Format("2006-01-02T15-04-05")+"-99999999-9999-9999-9999-999999999999.jsonl")
+	past := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(rolloutPath, past, past); err != nil {
+		t.Fatalf("os.Chtimes: %v", err)
+	}
+
+	// 2 回目: --since/--all を付けない、素の増分実行。codex はここで初めて
+	// Available() になるが、ingest_state に記録が無いので全件が対象になってほしい。
+	stdout, stderr, err := runIngestCLI(t, configPath, dbPath, "--no-evidence")
+	if err != nil {
+		t.Fatalf("2回目の ingest error = %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	}
+
+	ids := allSessionIDs(t, dbPath)
+	if len(ids) != 2 {
+		t.Fatalf("2回目取り込み後のセッション数 = %d, want 2（codex の過去ログが取りこぼされています）: %v\nstdout=%s\nstderr=%s",
+			len(ids), ids, stdout, stderr)
+	}
+
+	d, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer d.Close()
+	rows, err := d.SessionsInRange(time.Time{}, time.Date(2999, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("SessionsInRange: %v", err)
+	}
+	found := false
+	for _, r := range rows {
+		if r.Source == "codex" && r.SessionID == "99999999-9999-9999-9999-999999999999" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("source=codex のセッションが DB にありません: %+v", rows)
+	}
+}
+
 // TestIngest_AllSourcesMissingIsError は、有効なソースのログ置き場がどれも
 // 見つからないときはエラーにすることを確かめる。全部飛ばして「0 件取り込みました」で
 // 成功すると、設定ミスに気付けない。
