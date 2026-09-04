@@ -37,6 +37,20 @@ Go の開発環境がある場合は、ソースからでも入れられます�
 go install github.com/fuchigta/insights/cmd/insights@latest
 ```
 
+### 更新
+
+新しいリリースが出ていれば、コマンドの実行後に標準エラーで知らせます（端末で実行したときのみ）。
+更新は `insights update` で行います。バイナリが勝手に入れ替わることはありません。
+
+```bash
+insights update --check   # 確認だけ
+insights update           # 確認して、同意すれば置き換える
+```
+
+置き換える前に `.sha256` で照合し、新しいバイナリを実際に起動して期待するバージョンを
+名乗ることまで確かめます。`go install` で導入した場合は置き換えず、`go install` の手順を案内します。
+詳細は [docs/configuration.md](docs/configuration.md) を参照してください。
+
 ## 最初の一歩
 
 ```bash
@@ -70,6 +84,7 @@ cron やタスクスケジューラから実行する場合は、確認を省略
 | `actions list` \| `show ID` | 振り返りが生成した改善提案の状態を確認する |
 | `actions drop ID...` \| `reopen ID...` | 改善提案を見送り(dropped)にする／未着手に戻す |
 | `skill install` \| `status` \| `uninstall` | 他のコーディングエージェント（`--agent claude-code` \| `codex`）向けにスキルを導入・確認・削除する |
+| `update` | insights 自身を最新のリリースに更新する（`--check` で確認のみ） |
 
 各コマンドの詳細フラグは `insights <command> --help`、または [docs/configuration.md](docs/configuration.md) を参照してください。
 

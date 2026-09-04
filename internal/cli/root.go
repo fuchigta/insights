@@ -11,6 +11,7 @@ import (
 	"os"
 
 	"github.com/fuchigta/insights/internal/config"
+	"github.com/fuchigta/insights/internal/update"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +29,12 @@ const stateContextKey contextKey = iota
 type cliState struct {
 	config     *config.Config
 	configPath string
+	// rawVersion は -ldflags で埋め込まれた生のバージョン。表示用に解決した値ではなく
+	// 生の値を持つのは、導入方法の判定（update.DetectInstallMethod）が
+	// 「ldflags が入っていないこと」自体を材料にするため。
+	rawVersion string
+	// updateCh は裏で走らせている更新確認の受け口。確認しない場合は nil。
+	updateCh <-chan update.Result
 }
 
 // NewRootCommand は insights のルートコマンドを構築する。
@@ -41,10 +48,12 @@ func NewRootCommand(version string) *cobra.Command {
 	)
 
 	root := &cobra.Command{
-		Use:           "insights",
-		Short:         "コーディングエージェント利用の価値を振り返る CLI",
-		Long:          "セッションログを集約・評価し、日々のAI利用が生んだ価値とコストを振り返るための CLI。",
-		Version:       version,
+		Use:   "insights",
+		Short: "コーディングエージェント利用の価値を振り返る CLI",
+		Long:  "セッションログを集約・評価し、日々のAI利用が生んだ価値とコストを振り返るための CLI。",
+		// go install で入れた場合は -ldflags が無く version が "dev" のままになるため、
+		// モジュールのビルド情報にフォールバックした値を表示する。
+		Version:       update.ResolveVersion(version),
 		SilenceUsage:  true,
 		SilenceErrors: true, // エラー表示は cmd/insights/main.go に一任する
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -72,8 +81,18 @@ func NewRootCommand(version string) *cobra.Command {
 				cfg.Database = expanded
 			}
 
-			state := &cliState{config: cfg, configPath: resolvedPath}
+			state := &cliState{config: cfg, configPath: resolvedPath, rawVersion: version}
 			cmd.SetContext(context.WithValue(cmd.Context(), stateContextKey, state))
+
+			// 更新確認はここで開始だけして待たない（結果は PersistentPostRunE で拾う）。
+			startUpdateCheck(cmd, state)
+			return nil
+		},
+		// PersistentPostRunE は RunE が成功したときだけ走る。失敗の上に
+		// 更新通知を重ねないための性質なので、意図的にここへ置いている。
+		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+			state, _ := cmd.Context().Value(stateContextKey).(*cliState)
+			finishUpdateCheck(cmd, state)
 			return nil
 		},
 	}
@@ -91,6 +110,7 @@ func NewRootCommand(version string) *cobra.Command {
 	root.AddCommand(newRunCommand())
 	root.AddCommand(newActionsCommand())
 	root.AddCommand(newSkillCommand())
+	root.AddCommand(newUpdateCommand(version))
 
 	return root
 }
@@ -111,6 +131,16 @@ func ConfigFromContext(cmd *cobra.Command) (*config.Config, error) {
 		return nil, errors.New("設定がコンテキストにロードされていません（PersistentPreRunE が実行されていない可能性があります）")
 	}
 	return state.config, nil
+}
+
+// rawVersionFromContext は -ldflags で埋め込まれた生のバージョンを返す。
+// 取り出せない場合（root を経由しないテストなど）は空文字を返す。
+func rawVersionFromContext(cmd *cobra.Command) string {
+	state, ok := cmd.Context().Value(stateContextKey).(*cliState)
+	if !ok || state == nil {
+		return ""
+	}
+	return state.rawVersion
 }
 
 // ConfigPathFromContext は実際に読み込みを試みた設定ファイルの解決済みパスを返す。

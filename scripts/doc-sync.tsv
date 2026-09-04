@@ -45,6 +45,13 @@ internal/judge/codexcli/*.go	docs/cost.md	^[+-].*defaultTimeout
 # 実装の中身ではなく、その表に対応する定数が動いたときだけ発火させる。
 internal/source/*/*.go	docs/development.md	^[+-].*(Subdir|SUBDIR|rolloutPrefix|compressedSuffix|memoryDirName|subagentsDirName)
 
+# 自己更新の挙動（確認の間隔・更新できない場合・設定項目）は設定の説明に書いてある。
+internal/update/*.go	docs/configuration.md
+
+# 更新確認は github.com へ出る唯一の通信なので、何を送るかを扱いの説明に書いてある。
+# 通信の組み立てが動いたときだけ発火させる（置き換え手順の変更までは要求しない）。
+internal/update/*.go	docs/privacy.md	^[+-].*(NewRequestWithContext|User-Agent|userAgent)
+
 # スキルの配置先はエージェントごとの表として設定の説明に書いてある。
 internal/skill/*/*.go	docs/configuration.md	^[+-].*(skillsDirName|codexHomeDirName|"skills")
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/fuchigta/insights/internal/config"
 	"github.com/fuchigta/insights/internal/source/codex"
+	"github.com/fuchigta/insights/internal/update"
 	"github.com/spf13/cobra"
 )
 
@@ -31,6 +33,24 @@ type doctorResult struct {
 	CodexLogs        codexLogsCheck      `json:"codex_logs"`
 	Output           writeCheck          `json:"output"`
 	Database         writeCheck          `json:"database"`
+	Version          versionCheck        `json:"version"`
+}
+
+// versionCheck は insights 自身の版と更新の可否。
+//
+// 更新通知は端末のときにしか出さない（cron のログを汚さないため）ので、
+// 定期実行しかしていない利用者が新しい版に気付く口はここになる。
+type versionCheck struct {
+	Current         string `json:"current"`
+	Method          string `json:"method"`
+	ExecPath        string `json:"exec_path,omitempty"`
+	Latest          string `json:"latest,omitempty"`
+	UpdateAvailable bool   `json:"update_available"`
+	// Replaceable は実行中のバイナリを置き換えられるか（書き込み権限があるか）。
+	Replaceable bool `json:"replaceable"`
+	// Note は確認しなかった理由・更新の手順など、人間向けの補足。
+	Note  string `json:"note,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // toolCheck は外部コマンド 1 つの検出結果。
@@ -110,6 +130,7 @@ func newConfigDoctorCommand() *cobra.Command {
 			result.CodexLogs = checkCodexLogs(cfg)
 			result.Output = checkWritable(cfg.Output.Dir, true)
 			result.Database = checkWritable(cfg.Database, false)
+			result.Version = checkVersion(cmd.Context(), cfg, rawVersionFromContext(cmd))
 			result.OK = len(result.ValidationErrors) == 0
 
 			if err := PrintResult(cmd, func(w io.Writer) error {
@@ -262,6 +283,52 @@ func checkCodexLogs(cfg *config.Config) codexLogsCheck {
 	return result
 }
 
+// checkVersion は実行中の版と最新リリースを突き合わせる。
+//
+// ネットワークが無くても doctor 自体は落とさない（取れなかった旨を記録するだけ）。
+// 診断は「今の状態を伝える」ためのもので、確認できないこと自体は設定の誤りではない。
+func checkVersion(ctx context.Context, cfg *config.Config, rawVersion string) versionCheck {
+	method := update.DetectInstallMethod(rawVersion)
+	result := versionCheck{
+		Current: update.ResolveVersion(rawVersion),
+		Method:  string(method),
+	}
+
+	if execPath, err := update.ExecutablePath(); err == nil {
+		result.ExecPath = execPath
+		result.Replaceable = update.CheckWritable(execPath) == nil
+	}
+
+	switch {
+	case method == update.MethodDevBuild:
+		result.Note = "開発ビルドのため更新確認を行いません。"
+		return result
+	case !cfg.Update.Check:
+		result.Note = "update.check が false のため更新確認を行いません。"
+		return result
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, updateCheckTimeout)
+	defer cancel()
+
+	client := &update.Client{BaseURL: updateBaseURL}
+	res, err := client.Check(ctx, result.Current)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	result.Latest = res.Latest
+	result.UpdateAvailable = res.UpdateAvailable
+	if res.UpdateAvailable {
+		if method == update.MethodGoInstall {
+			result.Note = "更新: " + update.GoInstallCommand
+		} else {
+			result.Note = "更新: insights update"
+		}
+	}
+	return result
+}
+
 // checkWritable は path（isDir なら path 自体、そうでなければその親）を対象に、
 // 実在する最も近い祖先ディレクトリへ一時ファイルを作成できるかで書き込み可否を判定する。
 // 対象ディレクトリ自体は作成しない（doctor に副作用を持たせないため）。
@@ -391,6 +458,10 @@ func renderDoctorHuman(w io.Writer, r doctorResult) error {
 	}
 	fmt.Fprintln(w)
 
+	fmt.Fprintln(w, "バージョン:")
+	printVersionCheck(w, r.Version)
+	fmt.Fprintln(w)
+
 	fmt.Fprintln(w, "書き込み確認:")
 	printWriteCheck(w, "出力ディレクトリ", r.Output)
 	printWriteCheck(w, "データベース", r.Database)
@@ -402,6 +473,43 @@ func renderDoctorHuman(w io.Writer, r doctorResult) error {
 		fmt.Fprintln(w, "総合判定: 致命的な設定エラーがあります（上記の検証結果を参照してください）")
 	}
 	return nil
+}
+
+func printVersionCheck(w io.Writer, v versionCheck) {
+	fmt.Fprintf(w, "  現在: %s（導入方法: %s）\n", v.Current, versionMethodJP(v.Method))
+	if v.ExecPath != "" {
+		replaceable := "置き換え不可（権限がありません）"
+		if v.Replaceable {
+			replaceable = "置き換え可"
+		}
+		fmt.Fprintf(w, "  実行ファイル: %s - %s\n", v.ExecPath, replaceable)
+	}
+	switch {
+	case v.Error != "":
+		fmt.Fprintf(w, "  最新: 確認できません - %s\n", v.Error)
+	case v.Latest != "":
+		fmt.Fprintf(w, "  最新: %s\n", v.Latest)
+		if v.UpdateAvailable {
+			fmt.Fprintln(w, "  新しいバージョンがあります。")
+		}
+	}
+	if v.Note != "" {
+		fmt.Fprintf(w, "  %s\n", v.Note)
+	}
+}
+
+// versionMethodJP は導入方法の日本語表示。
+func versionMethodJP(m string) string {
+	switch update.InstallMethod(m) {
+	case update.MethodRelease:
+		return "リリースバイナリ"
+	case update.MethodGoInstall:
+		return "go install"
+	case update.MethodDevBuild:
+		return "開発ビルド"
+	default:
+		return m
+	}
 }
 
 func printWriteCheck(w io.Writer, label string, c writeCheck) {

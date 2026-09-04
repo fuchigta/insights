@@ -69,6 +69,21 @@ DB に入りうる**。DB はローカルのファイルで、外部には送ら
 
 アシスタントの応答やツール結果がレポートに転記されることはない。
 
+### 更新確認（github.com）
+
+`insights` は新しいリリースが出ていないかを github.com に問い合わせる。**このとき送るのは
+User-Agent（`insights/<バージョン> (<OS>/<アーキテクチャ>)`）だけで、セッションの内容・
+設定・プロジェクト名などは一切送らない。** 使うのは GitHub の公開ページ
+（`/releases/latest` のリダイレクト先を読むだけ）で、認証もトークンも要らない。
+
+問い合わせに行くのは次の場合だけ。
+
+- 標準エラーが端末のコマンド実行（cron やパイプ経由の実行では問い合わせない）
+- `insights update` / `insights config doctor`
+
+前回の確認から `update.interval`（既定 24 時間）のあいだは問い合わせない。
+一切ネットワークへ出したくない場合は `update.check: false`（[docs/configuration.md](configuration.md)）。
+
 ## なぜマスキングしていないか
 
 既定の送信先は Claude 本体であり、**Claude Code 自身と同じ信頼境界**にある。評価対象のセッションは
@@ -94,6 +109,7 @@ DB に入りうる**。DB はローカルのファイルで、外部には送ら
 - **entrypoint 単位で外す。** `exclude.entrypoints` で `sdk` などを除外できる。
 - **ログソース単位で外す。** `sources.claude-code.enabled` / `sources.codex.enabled` を
   `false` にすると、そのエージェントのセッションは取り込まれない。
+- **更新確認を切る。** `update.check: false` にすると、更新のために github.com へ問い合わせない。
 - **DB を消す。** `~/.insights/insights.db` を削除すれば、取り込んだ本文は残らない。ただし
   Claude Code のログは約 30 日で自動削除されるため、消したセッションは復元できない
   （[docs/scheduling.md](scheduling.md)）。Codex のログに自動削除は無いので、取り込み直せる。

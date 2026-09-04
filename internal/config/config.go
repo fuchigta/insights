@@ -28,6 +28,7 @@ type Config struct {
 	Exclude  ExcludeConfig  `yaml:"exclude"`
 	Goals    GoalsConfig    `yaml:"goals"`
 	Pricing  PricingConfig  `yaml:"pricing"`
+	Update   UpdateConfig   `yaml:"update"`
 }
 
 // SourcesConfig はログソースごとの設定。
@@ -125,6 +126,19 @@ type ModelPrice struct {
 	CacheRead    float64 `yaml:"cache_read"`
 }
 
+// UpdateConfig は insights 自身の更新確認の設定。
+//
+// 確認するだけで、バイナリを勝手に置き換えることはしない（置き換えは
+// `insights update` を明示的に叩いたときだけ）。自動で入れ替わると、
+// cron で回している最中に挙動が変わったのか、自分の変更が効いたのかを
+// 切り分けられなくなるため。
+type UpdateConfig struct {
+	// Check が false なら、ネットワークに一切出ない。
+	Check bool `yaml:"check"`
+	// Interval は確認の間隔。前回からこれだけ経つまでは問い合わせに行かない。
+	Interval Duration `yaml:"interval"`
+}
+
 // Default は既定値を埋めた Config を返す。
 func Default() *Config {
 	return &Config{
@@ -176,6 +190,10 @@ func Default() *Config {
 		},
 		Pricing: PricingConfig{
 			Overrides: map[string]ModelPrice{},
+		},
+		Update: UpdateConfig{
+			Check:    true,
+			Interval: Duration{Duration: 24 * time.Hour},
 		},
 	}
 }
@@ -279,6 +297,9 @@ func (c *Config) Validate() []error {
 	}
 	if strings.TrimSpace(c.Database) == "" {
 		errs = append(errs, errors.New("database が空です"))
+	}
+	if c.Update.Check && c.Update.Interval.Duration <= 0 {
+		errs = append(errs, fmt.Errorf("update.interval は正の値である必要があります: %s", c.Update.Interval.Duration))
 	}
 	for name, price := range c.Pricing.Overrides {
 		if price.Input < 0 || price.Output < 0 || price.CacheWrite5m < 0 || price.CacheWrite1h < 0 || price.CacheRead < 0 {

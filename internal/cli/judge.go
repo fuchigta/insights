@@ -392,6 +392,12 @@ func isInteractiveStdin(cmd *cobra.Command) bool {
 	if !ok {
 		return false
 	}
+	return isTerminalFile(f)
+}
+
+// isTerminalFile は *os.File が端末に繋がっているかを判定する。
+// 標準入力（対話確認）と標準エラー（更新通知）の両方から使う。
+func isTerminalFile(f *os.File) bool {
 	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 }
 
