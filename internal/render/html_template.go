@@ -80,6 +80,7 @@ ul.caveats li{ margin-bottom:4px; }
   <div class="stat-tile"><div class="label">総コスト</div><div class="value">{{.CostLabel}}</div></div>
   <div class="stat-tile"><div class="label">総時間</div><div class="value">{{.DurationLabel}}</div></div>
   <div class="stat-tile"><div class="label">評価済み / 総セッション</div><div class="value">{{.EvaluatedLabel}}</div></div>
+  <div class="stat-tile"><div class="label">PR/MR件数</div><div class="value">{{.PullRequestsLabel}}</div></div>
 </div>
 
 <h2>コストの推移</h2>
@@ -91,6 +92,9 @@ ul.caveats li{ margin-bottom:4px; }
 {{template "chart" .AchievedRatioChart}}
 <h3>成果の日次構成比</h3>
 {{template "chart" .OutcomeChart}}
+
+<h2>PR/MR件数の推移</h2>
+{{template "chart" .PullRequestTrendChart}}
 
 <h2>やり方の推移</h2>
 <h3>モデル適合 (model_fit)</h3>

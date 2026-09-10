@@ -82,17 +82,19 @@ type pageData struct {
 	Title       string
 	PeriodLabel string
 
-	PeriodDays     int
-	SessionsLabel  string
-	CostLabel      string
-	DurationLabel  string
-	EvaluatedLabel string
+	PeriodDays        int
+	SessionsLabel     string
+	CostLabel         string
+	DurationLabel     string
+	EvaluatedLabel    string
+	PullRequestsLabel string
 
 	CostTrendChart     chartBlock
 	CostBreakdownChart chartBlock
 
-	AchievedRatioChart chartBlock
-	OutcomeChart       chartBlock
+	AchievedRatioChart    chartBlock
+	OutcomeChart          chartBlock
+	PullRequestTrendChart chartBlock
 
 	ModelFitChart  chartBlock
 	OwnershipChart chartBlock
@@ -719,11 +721,13 @@ func buildPageData(s *rollup.Series, opt HTMLOptions) *pageData {
 	totalSessions := 0
 	totalDuration := 0.0
 	totalCost := 0.0
+	totalPullRequests := 0
 	evaluated := 0
 	for _, p := range pts {
 		totalSessions += p.Sessions
 		totalDuration += p.DurationMinutes
 		totalCost += p.CostUSD
+		totalPullRequests += p.PullRequestCount
 		for _, n := range p.Outcome {
 			evaluated += n
 		}
@@ -738,16 +742,18 @@ func buildPageData(s *rollup.Series, opt HTMLOptions) *pageData {
 		PeriodLabel: periodLabel(from, to, len(pts), missingDays),
 		PeriodDays:  periodDays,
 
-		SessionsLabel:  fmt.Sprintf("%d 件", totalSessions),
-		CostLabel:      formatMoneyPlain(totalCost),
-		DurationLabel:  formatDurationHours(totalDuration),
-		EvaluatedLabel: fmt.Sprintf("%d / %d 件（未評価 %d）", evaluated, totalSessions, unevaluated),
+		SessionsLabel:     fmt.Sprintf("%d 件", totalSessions),
+		CostLabel:         formatMoneyPlain(totalCost),
+		DurationLabel:     formatDurationHours(totalDuration),
+		EvaluatedLabel:    fmt.Sprintf("%d / %d 件（未評価 %d）", evaluated, totalSessions, unevaluated),
+		PullRequestsLabel: fmt.Sprintf("%d 件", totalPullRequests),
 
 		CostTrendChart:     buildCostTrendChart(pts, byModel),
 		CostBreakdownChart: buildCostBreakdownChart(byModel),
 
-		AchievedRatioChart: buildAchievedRatioChart(pts),
-		OutcomeChart:       buildOutcomeChart(pts),
+		AchievedRatioChart:    buildAchievedRatioChart(pts),
+		OutcomeChart:          buildOutcomeChart(pts),
+		PullRequestTrendChart: buildPullRequestTrendChart(pts),
 
 		ModelFitChart: buildFacetTrendChart(pts, "モデル適合の日次件数", func(p rollup.Point) map[string]int { return p.ModelFit },
 			[]string{"under", "appropriate", "over"}, modelFitColor, modelFitVerdictLabels),
@@ -1034,6 +1040,42 @@ func buildOutcomeChart(pts []rollup.Point) chartBlock {
 		SVG:    svg,
 		Legend: legend,
 		Table:  table,
+	}
+}
+
+// buildPullRequestTrendChart は PR/MR（GitHub PR + GitLab MR）の日次件数推移を折れ線で出す。
+// 件数は日によって規模が変わるため達成率チャートのような固定 Y 軸ではなく、
+// buildLineSVG のデータからの自動スケール（YMax を渡さない）に任せる。
+func buildPullRequestTrendChart(pts []rollup.Point) chartBlock {
+	if len(pts) == 0 {
+		return chartBlock{Title: "PR/MR件数の推移", Note: "期間内にデータがありません。"}
+	}
+
+	xLabels := make([]string, len(pts))
+	values := make([]float64, len(pts))
+	valid := make([]bool, len(pts))
+	for i, p := range pts {
+		xLabels[i] = shortDate(p.Date)
+		values[i] = float64(p.PullRequestCount)
+		valid[i] = true
+	}
+
+	series := []lineSeries{{
+		Name: "PR/MR", Color: categoricalSlots[0], Values: values, Valid: valid,
+		TooltipFmt: func(xl string, v float64) string { return fmt.Sprintf("%s: PR/MR %d 件", xl, int(v)) },
+	}}
+	svg := buildLineSVG(xLabels, series, lineChartOpt{YTickFmt: func(v float64) string { return fmt.Sprintf("%.0f", v) }})
+
+	table := &dataTable{Caption: "日次のPR/MR件数", Headers: []string{"日付", "PR/MR件数"}}
+	for _, p := range pts {
+		table.Rows = append(table.Rows, []string{p.Date, strconv.Itoa(p.PullRequestCount)})
+	}
+
+	return chartBlock{
+		Title: "PR/MR件数の推移",
+		Desc:  "GitHub PR と GitLab MR をまとめた件数。gh/glab CLI が使えない環境では常に 0 になる。",
+		SVG:   svg,
+		Table: table,
 	}
 }
 

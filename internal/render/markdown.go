@@ -87,15 +87,16 @@ func writeProjectTable(b *strings.Builder, projects []rollup.ProjectStat) {
 	}
 	sorted := sortedByCostDesc(projects)
 
-	b.WriteString("| プロジェクト | セッション数 | 時間 | コスト | コスト比率 | 内訳 |\n")
-	b.WriteString("| --- | ---: | ---: | ---: | ---: | --- |\n")
+	b.WriteString("| プロジェクト | セッション数 | 時間 | コスト | コスト比率 | PR/MR | 内訳 |\n")
+	b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: | --- |\n")
 	for _, p := range sorted {
-		fmt.Fprintf(b, "| %s | %d | %s | %s | %s | %s |\n",
+		fmt.Fprintf(b, "| %s | %d | %s | %s | %s | %d | %s |\n",
 			escapeTableCell(p.ProjectLabel),
 			p.Sessions,
 			formatDuration(p.DurationMinutes),
 			formatMoneyPlain(p.CostUSD),
 			formatRatioPercent(p.CostShare),
+			p.PullRequestCount,
 			escapeTableCell(rolledUpNote(p.RolledUp)),
 		)
 	}

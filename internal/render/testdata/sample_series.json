@@ -23,7 +23,8 @@
       "outcome": { "achieved": 1, "partial": 1, "exploratory": 1 },
       "model_fit": { "over": 2, "appropriate": 1 },
       "ownership": { "partial": 2, "black_box": 1 },
-      "achieved_ratio": 0.3333333333333333
+      "achieved_ratio": 0.3333333333333333,
+      "pull_request_count": 1
     },
     {
       "date": "2026-08-21",
@@ -34,7 +35,8 @@
       "outcome": { "achieved": 1, "abandoned": 1 },
       "model_fit": { "over": 1, "under": 1 },
       "ownership": { "understood": 1, "partial": 1 },
-      "achieved_ratio": 0.5
+      "achieved_ratio": 0.5,
+      "pull_request_count": 0
     },
     {
       "date": "2026-08-22",
@@ -45,7 +47,8 @@
       "outcome": {},
       "model_fit": {},
       "ownership": {},
-      "achieved_ratio": -1
+      "achieved_ratio": -1,
+      "pull_request_count": 0
     },
     {
       "date": "2026-08-24",
@@ -56,7 +59,8 @@
       "outcome": { "achieved": 2, "partial": 1, "exploratory": 1 },
       "model_fit": { "over": 1, "appropriate": 2, "under": 1 },
       "ownership": { "understood": 2, "partial": 1, "black_box": 1 },
-      "achieved_ratio": 0.5
+      "achieved_ratio": 0.5,
+      "pull_request_count": 3
     },
     {
       "date": "2026-08-25",
@@ -67,7 +71,8 @@
       "outcome": { "achieved": 1, "partial": 1 },
       "model_fit": { "appropriate": 2 },
       "ownership": { "understood": 2 },
-      "achieved_ratio": 0.5
+      "achieved_ratio": 0.5,
+      "pull_request_count": 1
     },
     {
       "date": "2026-08-27",
@@ -78,7 +83,8 @@
       "outcome": { "achieved": 2, "exploratory": 1 },
       "model_fit": { "appropriate": 2, "under": 1 },
       "ownership": { "understood": 3 },
-      "achieved_ratio": 0.6666666666666666
+      "achieved_ratio": 0.6666666666666666,
+      "pull_request_count": 2
     },
     {
       "date": "2026-08-28",
@@ -89,7 +95,8 @@
       "outcome": { "achieved": 1, "partial": 1 },
       "model_fit": { "appropriate": 1, "under": 1 },
       "ownership": { "understood": 1, "partial": 1 },
-      "achieved_ratio": 0.5
+      "achieved_ratio": 0.5,
+      "pull_request_count": 0
     },
     {
       "date": "2026-08-29",
@@ -100,7 +107,8 @@
       "outcome": { "achieved": 2, "abandoned": 1 },
       "model_fit": { "appropriate": 2, "under": 1 },
       "ownership": { "understood": 2, "black_box": 1 },
-      "achieved_ratio": 0.6666666666666666
+      "achieved_ratio": 0.6666666666666666,
+      "pull_request_count": 4
     }
   ],
   "by_model": [
