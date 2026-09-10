@@ -433,6 +433,87 @@ func TestBuildSeries_AchievedRatio(t *testing.T) {
 	}
 }
 
+func TestBuildDaily_PullRequestCountAggregation(t *testing.T) {
+	prices := testPrices(t)
+
+	in := DailyInput{
+		Date:   "2026-08-29",
+		Prices: prices,
+		Sessions: []SessionData{
+			{Row: store.SessionRow{
+				SessionID: "s1", ProjectPath: "/p1", ProjectLabel: "p1",
+				Entrypoint: "cli", StartedAt: mustTime(t, "2026-08-29T01:00:00Z"), EndedAt: mustTime(t, "2026-08-29T01:10:00Z"),
+			}, PullRequestCount: 2},
+			{Row: store.SessionRow{
+				SessionID: "s2", ProjectPath: "/p1", ProjectLabel: "p1",
+				Entrypoint: "cli", StartedAt: mustTime(t, "2026-08-29T02:00:00Z"), EndedAt: mustTime(t, "2026-08-29T02:10:00Z"),
+			}, PullRequestCount: 1},
+			{Row: store.SessionRow{
+				SessionID: "s3", ProjectPath: "/p2", ProjectLabel: "p2",
+				Entrypoint: "cli", StartedAt: mustTime(t, "2026-08-29T03:00:00Z"), EndedAt: mustTime(t, "2026-08-29T03:10:00Z"),
+			}, PullRequestCount: 3},
+			{Row: store.SessionRow{
+				SessionID: "s4-sidechain", ProjectPath: "/p1", ProjectLabel: "p1",
+				Entrypoint: "cli", IsSidechain: true, ParentSessionID: "s1",
+				StartedAt: mustTime(t, "2026-08-29T01:01:00Z"), EndedAt: mustTime(t, "2026-08-29T01:02:00Z"),
+			}, PullRequestCount: 5},
+		},
+	}
+
+	d, err := BuildDaily(in)
+	if err != nil {
+		t.Fatalf("BuildDaily() error = %v", err)
+	}
+
+	if d.Totals.PullRequestCount != 11 {
+		t.Errorf("Totals.PullRequestCount = %d, want 11 (2+1+3+5)", d.Totals.PullRequestCount)
+	}
+
+	byProject := map[string]int{}
+	for _, p := range d.ByProject {
+		byProject[p.ProjectPath] = p.PullRequestCount
+	}
+	if byProject["/p1"] != 8 {
+		t.Errorf("ByProject[/p1].PullRequestCount = %d, want 8 (2+1+5、sidechain含む)", byProject["/p1"])
+	}
+	if byProject["/p2"] != 3 {
+		t.Errorf("ByProject[/p2].PullRequestCount = %d, want 3", byProject["/p2"])
+	}
+
+	byID := map[string]int{}
+	for _, c := range d.Sessions {
+		byID[c.SessionID] = c.PullRequestCount
+	}
+	if byID["s1"] != 2 {
+		t.Errorf("SessionCard[s1].PullRequestCount = %d, want 2", byID["s1"])
+	}
+	if byID["s2"] != 1 {
+		t.Errorf("SessionCard[s2].PullRequestCount = %d, want 1", byID["s2"])
+	}
+	// sidechain は独立したカードにならない（親 s1 の委譲として畳まれるが、
+	// PullRequestCount 自体は EvidenceCount 同様に親へは畳み込まない）。
+	if _, ok := byID["s4-sidechain"]; ok {
+		t.Errorf("sidechain がカードとして表示されている: s4-sidechain")
+	}
+}
+
+func TestBuildSeries_PullRequestCount(t *testing.T) {
+	d1 := &Daily{Date: "2026-08-28", Totals: Totals{Sessions: 1, PullRequestCount: 2}, Facets: Facets{Outcome: map[string]int{}}}
+	d2 := &Daily{Date: "2026-08-29", Totals: Totals{Sessions: 2, PullRequestCount: 5}, Facets: Facets{Outcome: map[string]int{}}}
+
+	s := BuildSeries("2026-08-28", "2026-08-29", []*Daily{d2, d1}, nil)
+
+	if len(s.Points) != 2 {
+		t.Fatalf("len(Points) = %d, want 2", len(s.Points))
+	}
+	if s.Points[0].PullRequestCount != 2 {
+		t.Errorf("Points[0].PullRequestCount = %d, want 2", s.Points[0].PullRequestCount)
+	}
+	if s.Points[1].PullRequestCount != 5 {
+		t.Errorf("Points[1].PullRequestCount = %d, want 5", s.Points[1].PullRequestCount)
+	}
+}
+
 // ---- サブエージェント（sidechain）の畳み込み ----
 
 // ワークツリーで動いたサブエージェントは、親に畳まずそれ自体を 1 本の作業として扱う。

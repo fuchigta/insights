@@ -38,6 +38,9 @@ type Totals struct {
 	CostUSD             float64 `json:"cost_usd"`
 	// UnpricedEvents は単価が引けなかった usage の件数。0 でなければ CostUSD は過小評価。
 	UnpricedEvents int `json:"unpriced_events"`
+	// PullRequestCount は GitHub PR と GitLab MR の合計件数（sidechain 含む全セッションの合計）。
+	// 両者は「何を作って提出したか」という意味では同じ指標なので、Kind 別には分けず合算する。
+	PullRequestCount int `json:"pull_request_count"`
 }
 
 // ModelUsage はモデル別の使用量と金額。「どのモデルに金が消えたか」の一次データ。
@@ -60,6 +63,9 @@ type ProjectStat struct {
 	Sessions        int     `json:"sessions"`
 	DurationMinutes float64 `json:"duration_minutes"`
 	CostUSD         float64 `json:"cost_usd"`
+	// PullRequestCount はこのプロジェクトの PR/MR 合計件数。Sessions/DurationMinutes/CostUSD
+	// と同様、sidechain を含む全セッションの合計。
+	PullRequestCount int `json:"pull_request_count"`
 	// CostShare はその日の総コストに占める割合（0..1）。どこに金が向いたかを
 	// 絶対額ではなく配分として見るために持つ。
 	CostShare float64 `json:"cost_share"`
@@ -118,12 +124,15 @@ type SessionCard struct {
 	// ExecutionMode は "interactive"（対話実行）か "automated"（`claude -p` などの
 	// 非対話実行）。日報・振り返りのプロンプトは entrypoint の生値から自動実行かを
 	// 推測できないため、判定済みの値を渡す。過去の daily_rollups には無いので空もありうる。
-	ExecutionMode string      `json:"execution_mode,omitempty"`
-	Models        []string    `json:"models"`
-	CostUSD       float64     `json:"cost_usd"` // このセッション自身のコスト（子を含まない）
-	Priced        bool        `json:"priced"`
-	EvidenceCount int         `json:"evidence_count"`
-	Eval          *model.Eval `json:"eval,omitempty"` // 未評価なら nil
+	ExecutionMode string   `json:"execution_mode,omitempty"`
+	Models        []string `json:"models"`
+	CostUSD       float64  `json:"cost_usd"` // このセッション自身のコスト（子を含まない）
+	Priced        bool     `json:"priced"`
+	EvidenceCount int      `json:"evidence_count"`
+	// PullRequestCount はこのセッションに紐づく PR/MR の件数。EvidenceCount（commit/issue を
+	// 含む全成果物件数）とは別の指標として持つ。
+	PullRequestCount int         `json:"pull_request_count"`
+	Eval             *model.Eval `json:"eval,omitempty"` // 未評価なら nil
 
 	// サブエージェント（sidechain）は独立したセッションとしては扱わず、
 	// 委譲元である親セッションにコストを計上する。子は情報量が少なく、
@@ -237,14 +246,16 @@ type EvalHealth struct {
 
 // Point は 1 日分の集計値。HTML のグラフはこの列だけを見る。
 type Point struct {
-	Date            string             `json:"date"`
-	Sessions        int                `json:"sessions"`
-	DurationMinutes float64            `json:"duration_minutes"`
-	CostUSD         float64            `json:"cost_usd"`
-	CostByModel     map[string]float64 `json:"cost_by_model"`
-	Outcome         map[string]int     `json:"outcome"`
-	ModelFit        map[string]int     `json:"model_fit"`
-	Ownership       map[string]int     `json:"ownership"`
+	Date            string  `json:"date"`
+	Sessions        int     `json:"sessions"`
+	DurationMinutes float64 `json:"duration_minutes"`
+	CostUSD         float64 `json:"cost_usd"`
+	// PullRequestCount はその日の PR/MR 件数合計（Totals.PullRequestCount のコピー）。
+	PullRequestCount int                `json:"pull_request_count"`
+	CostByModel      map[string]float64 `json:"cost_by_model"`
+	Outcome          map[string]int     `json:"outcome"`
+	ModelFit         map[string]int     `json:"model_fit"`
+	Ownership        map[string]int     `json:"ownership"`
 	// AchievedRatio は achieved / 評価済みセッション数。評価が 0 件の日は -1 を入れ、
 	// 「0%」と「データなし」を区別できるようにする。
 	AchievedRatio float64 `json:"achieved_ratio"`

@@ -98,6 +98,10 @@ type SessionData struct {
 	Usage    []store.UsageRow
 	Eval     *model.Eval // 未評価なら nil
 	Evidence int         // 件数だけでよい
+	// PullRequestCount は Evidence のうち Kind が "pr"/"mr" のものの件数。Kind の判定は
+	// 呼び出し側（daily.go）の責務とし、rollup パッケージは model.Evidence の形そのものに
+	// 依存しない（Evidence int と同じ設計方針）。
+	PullRequestCount int
 }
 
 // modelAgg はモデル別集計の作業用アキュムレータ。
@@ -120,13 +124,14 @@ type projectAgg struct {
 // sessionCalc は 1 セッション分の中間計算結果。Pass 1 で全セッション分（sidechain 含む）を
 // 作り、Pass 2 でカード化、Pass 3 で sidechain の親への畳み込みに使う。
 type sessionCalc struct {
-	row      store.SessionRow
-	duration float64
-	cost     float64 // このセッション自身のコスト（子を含まない）
-	allKnown bool
-	models   []string
-	eval     *model.Eval
-	evidence int
+	row              store.SessionRow
+	duration         float64
+	cost             float64 // このセッション自身のコスト（子を含まない）
+	allKnown         bool
+	models           []string
+	eval             *model.Eval
+	evidence         int
+	pullRequestCount int
 }
 
 // newFacets は空（nil ではない）の Facets を返す。評価が 1 件も無くても
@@ -240,6 +245,7 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 			d.Totals.AutomatedSessions++
 		}
 		d.Totals.DurationMinutes += duration
+		d.Totals.PullRequestCount += sd.PullRequestCount
 
 		modelSet := map[string]struct{}{}
 		var sessionCost float64
@@ -309,6 +315,7 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 		pa.stat.Sessions++
 		pa.stat.DurationMinutes += duration
 		pa.stat.CostUSD += sessionCost
+		pa.stat.PullRequestCount += sd.PullRequestCount
 
 		if sd.Eval == nil {
 			// sidechain も含めて全セッションが評価対象なので、未評価はすべて評価漏れ。
@@ -334,13 +341,14 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 		}
 
 		calcs[row.SessionID] = &sessionCalc{
-			row:      row,
-			duration: duration,
-			cost:     sessionCost,
-			allKnown: sessionAllKnown,
-			models:   models,
-			eval:     sd.Eval,
-			evidence: sd.Evidence,
+			row:              row,
+			duration:         duration,
+			cost:             sessionCost,
+			allKnown:         sessionAllKnown,
+			models:           models,
+			eval:             sd.Eval,
+			evidence:         sd.Evidence,
+			pullRequestCount: sd.PullRequestCount,
 		}
 		calcOrder = append(calcOrder, row.SessionID)
 	}
@@ -356,21 +364,22 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 			continue
 		}
 		card := &SessionCard{
-			SessionID:       c.row.SessionID,
-			ProjectLabel:    c.row.ProjectLabel,
-			Worktree:        c.row.Worktree,
-			Title:           c.row.Title,
-			FirstPrompt:     c.row.FirstPrompt,
-			StartedAt:       c.row.StartedAt,
-			DurationMinutes: c.duration,
-			IsSidechain:     c.row.IsSidechain,
-			Entrypoint:      c.row.Entrypoint,
-			ExecutionMode:   executionMode(c.row.Entrypoint),
-			Models:          c.models,
-			CostUSD:         c.cost,
-			Priced:          c.allKnown,
-			EvidenceCount:   c.evidence,
-			Eval:            c.eval,
+			SessionID:        c.row.SessionID,
+			ProjectLabel:     c.row.ProjectLabel,
+			Worktree:         c.row.Worktree,
+			Title:            c.row.Title,
+			FirstPrompt:      c.row.FirstPrompt,
+			StartedAt:        c.row.StartedAt,
+			DurationMinutes:  c.duration,
+			IsSidechain:      c.row.IsSidechain,
+			Entrypoint:       c.row.Entrypoint,
+			ExecutionMode:    executionMode(c.row.Entrypoint),
+			Models:           c.models,
+			CostUSD:          c.cost,
+			Priced:           c.allKnown,
+			EvidenceCount:    c.evidence,
+			PullRequestCount: c.pullRequestCount,
+			Eval:             c.eval,
 		}
 		cardByID[id] = card
 		projectCards[c.row.ProjectPath] = append(projectCards[c.row.ProjectPath], card)
@@ -580,14 +589,15 @@ func BuildSeries(from, to string, dailies []*Daily, actions []model.Action) *Ser
 		}
 
 		s.Points = append(s.Points, Point{
-			Date:            d.Date,
-			Sessions:        d.Totals.Sessions,
-			DurationMinutes: d.Totals.DurationMinutes,
-			CostUSD:         d.Totals.CostUSD,
-			CostByModel:     costByModel,
-			Outcome:         copyIntMap(d.Facets.Outcome),
-			ModelFit:        copyIntMap(d.Facets.ModelFit),
-			Ownership:       copyIntMap(d.Facets.Ownership),
+			Date:             d.Date,
+			Sessions:         d.Totals.Sessions,
+			DurationMinutes:  d.Totals.DurationMinutes,
+			CostUSD:          d.Totals.CostUSD,
+			PullRequestCount: d.Totals.PullRequestCount,
+			CostByModel:      costByModel,
+			Outcome:          copyIntMap(d.Facets.Outcome),
+			ModelFit:         copyIntMap(d.Facets.ModelFit),
+			Ownership:        copyIntMap(d.Facets.Ownership),
 			// 評価済みセッションが 0 件の日は -1（「0%」と「データなし」の区別）。
 			AchievedRatio: ratio,
 		})
