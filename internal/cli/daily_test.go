@@ -16,6 +16,7 @@ import (
 	"github.com/fuchigta/insights/internal/judge"
 	"github.com/fuchigta/insights/internal/judge/claudecli"
 	"github.com/fuchigta/insights/internal/judge/prompts"
+	"github.com/fuchigta/insights/internal/model"
 	"github.com/fuchigta/insights/internal/pricing"
 	"github.com/fuchigta/insights/internal/store"
 	"github.com/spf13/cobra"
@@ -131,6 +132,51 @@ func newDailyTestCmd(t *testing.T) *cobra.Command {
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
 	return cmd
+}
+
+// TestBuildSessionData_PullRequestCount は Evidence の Kind 文字列判定が正しく
+// PR/MR だけを数え、commit/issue を数えないことを検証する。Kind 判定という
+// 最もバグりやすい箇所を狙い撃ちで確認するための直接テスト。
+func TestBuildSessionData_PullRequestCount(t *testing.T) {
+	db := newTempDB(t)
+	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+
+	saveTestSession(t, db, testSessionSpec{
+		SessionID: "s1", StartedAt: base, EndedAt: base.Add(10 * time.Minute),
+	})
+
+	if err := db.SaveEvidence([]model.Evidence{
+		{SessionID: "s1", Kind: "commit", Ref: "abc123", Timestamp: base},
+		{SessionID: "s1", Kind: "pr", Ref: "https://github.com/x/y/pull/1", Timestamp: base},
+		{SessionID: "s1", Kind: "pr", Ref: "https://github.com/x/y/pull/2", Timestamp: base},
+		{SessionID: "s1", Kind: "issue", Ref: "https://github.com/x/y/issues/3", Timestamp: base},
+		{SessionID: "s1", Kind: "mr", Ref: "https://gitlab.example.com/x/y/-/merge_requests/4", Timestamp: base},
+	}); err != nil {
+		t.Fatalf("db.SaveEvidence() error = %v", err)
+	}
+
+	rows, err := db.SessionsInRange(base.Add(-time.Hour), base.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("SessionsInRange() error = %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("前提: rows の件数 = %d, want 1", len(rows))
+	}
+
+	sessionData, err := buildSessionData(db, rows, nil)
+	if err != nil {
+		t.Fatalf("buildSessionData() error = %v", err)
+	}
+	if len(sessionData) != 1 {
+		t.Fatalf("len(sessionData) = %d, want 1", len(sessionData))
+	}
+
+	if got := sessionData[0].Evidence; got != 5 {
+		t.Errorf("Evidence = %d, want 5（commit+pr+pr+issue+mr の全件数）", got)
+	}
+	if got := sessionData[0].PullRequestCount; got != 3 {
+		t.Errorf("PullRequestCount = %d, want 3（pr 2件 + mr 1件。commit/issue は数えない）", got)
+	}
 }
 
 func TestDaily_WritesTwoMarkdownFilesAndExcludesSidechain(t *testing.T) {

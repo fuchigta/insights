@@ -379,13 +379,26 @@ func buildSessionData(db *store.DB, rows []store.SessionRow, usageRows []store.U
 		}
 
 		out = append(out, rollup.SessionData{
-			Row:      r,
-			Usage:    usageBySession[r.SessionID],
-			Eval:     ev,
-			Evidence: len(evidenceItems),
+			Row:              r,
+			Usage:            usageBySession[r.SessionID],
+			Eval:             ev,
+			Evidence:         len(evidenceItems),
+			PullRequestCount: countPullRequests(evidenceItems),
 		})
 	}
 	return out, nil
+}
+
+// countPullRequests は Evidence のうち PR（GitHub）/MR（GitLab）の件数を数える。
+// レポート上は両者を「PR/MR」として一体の指標にするため、Kind別には分けない。
+func countPullRequests(items []model.Evidence) int {
+	n := 0
+	for _, e := range items {
+		if e.Kind == "pr" || e.Kind == "mr" {
+			n++
+		}
+	}
+	return n
 }
 
 // loadRecentDailies は date より前の直近 days 日分の Daily を daily_rollups から復元する。
