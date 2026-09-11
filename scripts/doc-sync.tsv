@@ -57,6 +57,10 @@ internal/skill/*/*.go	docs/configuration.md	^[+-].*(skillsDirName|codexHomeDirNa
 
 # コミット時・CI で走る検査の一覧は開発ドキュメントに書いてある。
 scripts/check-*.sh	docs/development.md
+
+# 外部ツールへ切り出す設計メモは、検査の「設定にすべき面」（対応表・除外リスト・閾値・免除トレーラ）の
+# 棚卸しが中身。実装の中身ではなく、その面が動いたときだけ発火させる。
+scripts/check-*.sh	docs/hooks-extraction.md	^[+-].*(PATTERN=|SKIP_PATTERN|TABLE=|IGNORE=|MAX_BYTES)
 .githooks/*	docs/development.md
 
 # GitHub 側の設定（Dependabot）の意図も開発ドキュメントに書いてある。
