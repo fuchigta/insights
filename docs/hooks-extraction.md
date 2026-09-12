@@ -63,44 +63,115 @@ guards doctor                        # 有効な検査の一覧、フックが�
 
 ### 設定ファイル
 
-現在は TSV とテキストに散っている設定を、リポジトリ直下の 1 枚に寄せます。検査ごとに
-**範囲の意味論と免除トレーラを設定として明示する**のが現在との一番の違いです（いまはスクリプトに
-焼き付いていて、読む側からは見えません）。
+現在は TSV とテキストに散っている設定を、リポジトリ直下の 1 枚に寄せます。**「検査の実装
+（type）を定義する場所」と「その type をインスタンス化してパラメータを与える場所」を分離する**
+のが現在との一番の違いです（いまはスクリプトに焼き付いていて、読む側からは見えません）。
+
+組み込みの type（`doc-sync` / `unwanted-files` / `doc-paths` / `commit-subject`）は暗黙に
+登録済みで、`types` に書かなくても `checks` から使えます。`types` に同名で書いた場合は、
+その組み込み type の既定値（`default`）を上書きする意味になります。外部コマンドを追加するときも
+同じ `types` に登録し、`command` を持たせるだけです（`command` を特別扱いする専用の type 名は
+作らず、「`command` フィールドを持つかどうか」で組み込みと外部コマンドを区別します）。
 
 ```yaml
+types:
+  commit-subject:
+    default:
+      exempt:
+        enable: false     # メッセージの体裁そのものを検証する検査なので、免除は既定で不可にする
+
+  my-custom-check:
+    command: ./scripts/my-check.sh
+    default:
+      granularity: per-commit
+      exempt:
+        enable: true
+    schema:                          # checks 側で渡せるオプションの形（省略可）
+      simple:
+        threshold: { type: integer, required: true }
+
+  my-json-schema-check:
+    command: ./scripts/other-check.sh
+    schema:
+      json-schema:                   # フル JSON Schema で書きたい場合はこちら
+        type: object
+        properties:
+          pattern: { type: string, pattern: "^[a-z]+$" }
+        required: [pattern]
+
 checks:
-  doc-sync:
-    granularity: squashed        # 範囲の端から端をひとまとめに見る
-    exempt_trailer: Doc-Sync     # 本文に `Doc-Sync: skip <理由>` があれば免除
+  # 同じ doc-sync を用途別に複数インスタンス化する例。1 系統にまとめると、免除トレーラが
+  # どの対応表にも効いてしまい「ザル」になるため、対応表ごとにキーを分ける。
+  doc-sync-frontend:
+    type: doc-sync
     pairs:
       - paths: "internal/cli/*.go"
         doc: README.md
         when: '^[+-].*(Use:|Short:|Flags\(\)\.|AddCommand\()'
-    exclude: ["*_test.go"]       # テストは利用者に見える面を定義しないため
+    exclude: ["*_test.go"]          # テストは利用者に見える面を定義しないため
+
+  doc-sync-backend:
+    type: doc-sync
+    pairs: [...]
 
   unwanted-files:
-    granularity: per-commit      # 後から消しても直らないのでコミット単位
-    exempt_trailer: Unwanted-Files
+    type: unwanted-files
     max_bytes: 1048576
     deny:
       - { paths: "*.jsonl", reason: "取り込み元のセッションログ" }
 
-  doc-paths:
-    docs: ["README.md", "CLAUDE.md", "docs/*.md", ".github/*.md"]
-    prefixes: ["internal", "cmd", "scripts", ".githooks", ".github"]
-    ignore: [...]
-
   commit-subject:
-    types: [feat, fix, perf, refactor, docs, test, build, ci, chore, revert]
+    type: commit-subject            # types.commit-subject の default（exempt 不可）を継承する
+    allowed_types: [feat, fix, perf, refactor, docs, test, build, ci, chore, revert]
 
-  # 一般化が難しい検査は外部コマンドとして逃がす。
-  commit-types:
-    type: command
-    run: ./scripts/check-commit-types.sh
+  my-check-a:
+    type: my-custom-check
+    threshold: 10
+  my-check-b:                       # 同じ type を設定違いで複数インスタンス化
+    type: my-custom-check
+    threshold: 20
+    exempt:
+      trailer: MyCheckB2             # enable は type の default(true) を継承、trailer だけ上書き
 ```
 
-最後の `type: command` は重要です。**固有性の高い検査の逃がし先**があることで、「汎用ツールに
-寄せられないから全部自前のまま」にならずに済みます。
+**固有性の高い検査を `command` で外部に逃がせる**ことは重要です。「汎用ツールに寄せられないから
+全部自前のまま」にならずに済みます（`check-commit-types.sh` のような、抽出規則がファイル形式に
+依存する検査の受け皿）。
+
+#### `exempt` は常に object にする
+
+`enable`（真偽値）と `trailer`（文字列）を持つ object 一択にします。boolean と object の
+どちらも取れるユニオンにすると「object が来たら enable を true とみなすのか、type 側の
+default から継承するのか」が曖昧になるためです。object 一択なら、次の優先順でフィールド単位に
+マージするだけで済みます（`granularity` も同じマージ規則に乗せます）。
+
+```
+checks.<key>.exempt.<field>
+  → types.<type>.default.exempt.<field>
+    → システム既定（enable: true, trailer は <key> から自動生成）
+```
+
+`trailer` の既定値の生成元は **`type` ではなく `checks` のキー**にします。`type` から生成すると、
+`doc-sync-frontend` / `doc-sync-backend` のように同じ type を複数インスタンス化したときに
+トレーラ名が衝突してしまうためです。
+
+#### `schema` は 2 つの書き方をサポートする
+
+`command` で外部検査を登録するときに渡せるオプションを検証したい一方、フル JSON Schema を
+毎回書きたい人は多くないはずなので、省略記法とフル記法をどちらも受け付けます。
+
+判別に専用の `kind` フィールドは置きません。`kind: simple` + `fields: {...}` のように分けると、
+Go 側では「まず `kind` だけを読んでから、該当フィールドだけ具体型にデコードし直す」という
+2 段階デコードが必要になります。代わりに `simple` / `json-schema` という**キー自体を
+discriminator にする**（どちらか片方だけを持つ object）と、両方を `omitempty` で持つ構造体への
+通常のデコードだけで済みます。
+
+```go
+type SchemaConfig struct {
+    Simple     map[string]FieldSpec `yaml:"simple,omitempty"`
+    JSONSchema *jsonschema.Schema   `yaml:"json-schema,omitempty"`
+}
+```
 
 ### CI 側の範囲算出
 
@@ -108,6 +179,28 @@ checks:
 比較対象が無ければ `-1 HEAD`」の分岐は、どのプロジェクトでもそのままコピペされる部分です。
 `guards range` として持たせると、CI 側の記述が `guards check --range "$(guards range)"` まで縮みます。
 地味ですが、導入の手間に一番効きます。
+
+**組み込みで自動検出するのは GitHub Actions と GitLab CI（セルフホスト含む）の 2 つに限定します。**
+他の CI は将来的にも組み込みで持たず、`guards check --range <from>..<to>` に自分で組み立てた
+範囲を渡してもらう形にします。CI ごとの検出ロジックは実機でしか検証しにくく、増やすほど
+「Go を選んだのはテストを書けるから」という利点を削るためです。
+
+両者とも本質的には同じ 3 パターン（① MR/PR イベント → base..head、② push イベント →
+before..after、③ 判定できない・新規ブランチ等 → フォールバック `-1 HEAD`）に落ちるので、
+共通ロジック 1 つ＋環境変数名の違いを吸収するアダプタという構成にします。
+
+| | GitHub Actions | GitLab CI |
+|---|---|---|
+| 検出用フラグ | `GITHUB_ACTIONS=true` | `GITLAB_CI=true` |
+| MR/PR イベント判定 | `GITHUB_EVENT_NAME=pull_request` | `CI_PIPELINE_SOURCE=merge_request_event` |
+| その base | イベント JSON の `pull_request.base.sha` | `CI_MERGE_REQUEST_DIFF_BASE_SHA` |
+| push イベントの before | `github.event.before` | `CI_COMMIT_BEFORE_SHA` |
+
+自動検出は環境変数の有無で行い、`--provider github-actions|gitlab-ci` で明示上書きもできるように
+します。どちらも、新規ブランチの最初の push や force push 直後は before 相当の SHA が
+全部ゼロ（`0000...`）になることがあるため、そのフォールバックを両アダプタで揃える必要があります。
+実装前に `.github/workflows/ci.yml` の該当分岐を読み直して、insights 側がすでにこのケースを
+どう扱っているか確認してから仕様に落とします。
 
 ## 4. 実装で詰まるところ
 
@@ -150,13 +243,22 @@ checks:
    記述も同時に直す（対応表の書式が変わるため）
 4. `commit-subject` と `doc-paths` を同じ手順で移す
 5. `check-commit-types.sh` は最後。「ファイル + 抽出正規表現の集合を突き合わせる」汎用検査
-   （仮称 `consistency`）に一般化できるかを見てから決める。できなければ `type: command` のまま残す
+   （仮称 `consistency`）に一般化できるかを見てから決める。できなければ `command` を持つ
+   type のまま残す
 
 ## 7. 決めていないこと
 
 - リポジトリ名・コマンド名
-- 設定は YAML 1 枚か、現在の TSV の読みやすさを残すか（対応表は行指向のほうが diff が読みやすい）
 - insights のリリースと同様にバイナリを配るか、`go install` だけにするか
-- 検査の追加を他人から受け付けるか（受け付けるなら、検査は設定で有効・無効を切り替えられる必要がある）
+- `granularity` を `exempt` と同じ「type の default → checks 側で上書き」というマージ規則に
+  乗せてよいか。`unwanted-files` の per-commit は「後から消しても履歴に残る」という検査の性質に
+  由来するので、上書きを許すこと自体が事故の元になる可能性がある
+- `schema` の `json-schema` 側で実際にどこまで検証するか（型チェックだけか、`pattern` /
+  `enum` のような制約まで含めるか）。使う Go 側の JSON Schema 実装の選定も未着手
+- GitLab CI 向けの range アダプタは insights 自身の CI（GitHub Actions のみ）では実地検証できない。
+  導入する会社環境での動作確認が前提になる
+- `doc-sync` の `pairs` のような行指向で見たい対応表を YAML の中でどこまで読みやすく保てるか
+  （TSV は diff が読みやすいという利点があったが、YAML への統一自体はここまでの検討で
+  自然に前提になっている）
 
 [← README に戻る](../README.md)
