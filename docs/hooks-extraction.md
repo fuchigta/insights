@@ -143,7 +143,7 @@ checks:
 `enable`（真偽値）と `trailer`（文字列）を持つ object 一択にします。boolean と object の
 どちらも取れるユニオンにすると「object が来たら enable を true とみなすのか、type 側の
 default から継承するのか」が曖昧になるためです。object 一択なら、次の優先順でフィールド単位に
-マージするだけで済みます（`granularity` も同じマージ規則に乗せます）。
+マージするだけで済みます。
 
 ```
 checks.<key>.exempt.<field>
@@ -154,6 +154,33 @@ checks.<key>.exempt.<field>
 `trailer` の既定値の生成元は **`type` ではなく `checks` のキー**にします。`type` から生成すると、
 `doc-sync-frontend` / `doc-sync-backend` のように同じ type を複数インスタンス化したときに
 トレーラ名が衝突してしまうためです。
+
+#### `granularity` は組み込み type では固定にする
+
+`exempt` とは違い、`granularity` は checks 側で上書きできるようにしません。`unwanted-files` の
+`per-commit`（後から消しても履歴に残るから、という検査の性質そのものに由来する値）を
+`squashed` に緩められてしまうと、§2 で挙げた「検査ごとに違う範囲の意味論を正しく表現する」という
+差別化ポイント自体が checks 側の設定ミスで骨抜きになります。`command` 型は検査作者が
+`types.<name>.default.granularity` で決め、そちらは上書き不可というルールが組み込み型と揃います
+（checks 側からは変更できない値、という点で組み込み・command 型とも共通）。
+
+#### 組み込み type とのキー衝突はエラーにする
+
+`types` に組み込み type と同名（例: `doc-sync`）のエントリを書けるのは `default` を上書きする
+ときだけです。そこに `command` まで書かれていたら（＝組み込み実装を外部コマンドで丸ごと
+差し替えようとしているのか、単なる typo による衝突なのか区別が付かない）、設定エラーとして
+起動時に拒否します。意図的な差し替えをしたい、という要望が実際に出てから、専用の書き方を
+別途用意するかを検討します。
+
+#### 組み込み type のオプション検証は `schema` を経由しない
+
+`schema` は `command` 型のために導入した機構で、組み込み type（`doc-sync` の `pairs` など）は
+Go の構造体タグによる検証のままにします。組み込みは検証した値をそのまま Go の型として
+使う必要があるため、`schema` で検証してから改めて構造体にマッピングする層を挟むと、検証と
+デコードが二重管理になり複雑化します。`command` 型は値を外部プロセスに渡すだけなので
+`schema` による検証だけで完結しますが、この非対称は「組み込みと command 型を同列に扱う」という
+方針とは別レイヤーの実装上の割り切りとして許容します（type の明示・複数インスタンス化・
+`exempt`/`granularity` の共通ルールというレベルでは、両者は同列のままです）。
 
 #### `schema` は 2 つの書き方をサポートする
 
@@ -172,6 +199,73 @@ type SchemaConfig struct {
     JSONSchema *jsonschema.Schema   `yaml:"json-schema,omitempty"`
 }
 ```
+
+### `command` 型の入出力契約
+
+外部コマンドに何をどう渡すかは、まだどこにも書いていませんでした。既存の `check-doc-sync.sh` /
+`check-unwanted-files.sh` は変更ファイルリストも diff の中身も自分で `git` を呼んで取得しており、
+この資産をそのまま活かせる形にします。**ホストが渡すのは「どの範囲を見るか」と「免除判定用の
+メッセージ」だけ**にし、ファイルリストや diff は検査コマンド自身が `git` で取得します（`git` を
+使う前提はこのツールの他の部分ですでに置いているので、検査コマンド側が依存しても違和感が
+ありません）。
+
+```
+<command> --mode staged --message-file <path>
+<command> --mode range  --from <sha> --to <sha> --message-file <path>
+```
+
+- 終了コード 0 = 成功、非 0 = 失敗。stderr に人間向けメッセージを出す、という今の規約のまま
+- `--message-file` は改行やマルチバイト文字を安全に扱うため、環境変数ではなくファイル渡しにする
+  （`commit-msg` フックが `msgfile` を渡す今のやり方と同じ）
+
+**`granularity` に応じたプロセス起動の粒度制御はホストが担い、検査コマンドは「1 回の呼び出し
+＝ 1 つの比較範囲」というモデルだけを知っていればよい**ようにします。
+
+- `granularity: per-commit` → 範囲内のコミットごとに 1 回ずつ起動（`--from` はその親コミット、
+  `--message-file` はそのコミット単体のメッセージ）
+- `granularity: squashed` → 範囲全体で 1 回だけ起動（`--from` は範囲の始点の親、`--message-file`
+  は範囲内の全コミットメッセージを連結したもの）
+
+**免除判定（`exempt`）はホストが検査コマンドを起動する前に済ませます。** 免除に該当するなら
+そもそも起動しないので、検査コマンド側はトレーラの正規表現を自分で持つ必要がありません
+（`--message-file` は免除判定用ではなく、メッセージの中身自体を検証したい検査向けに残します。
+`commit-subject` 相当を外部コマンドで作りたい場合の受け皿です）。
+
+#### `schema` で検証したオプションの受け渡し（`transport`）
+
+`schema` で定義した検査固有オプションをどう検査コマンドに渡すかは、`types` ごとに選べるように
+します。
+
+```yaml
+types:
+  my-custom-check:
+    command: ./scripts/my-check.sh
+    transport: args           # args | env | file（既定）
+    schema:
+      simple:
+        threshold: { type: integer, required: true }
+```
+
+| transport | 渡し方 | 許容するスキーマ形状 |
+|---|---|---|
+| `file`（既定） | JSON 一時ファイル＋ `--options-file <path>` | 制限なし |
+| `args` | `--<field> <value>` に展開。配列は繰り返し引数（`--paths a --paths b`） | トップレベル全フィールドがスカラー、またはスカラーの配列 |
+| `env` | `GUARDS_OPT_<FIELD>=<value>` | トップレベル全フィールドがスカラーのみ |
+
+`file` を既定にしたのは安全側に倒すためです。スキーマがスカラーのみでも、明示的に `args`/`env`
+を選ばない限り JSON 渡しのままにしておけば、将来スキーマに配列フィールドを 1 つ足しても
+既存の `command` 型検査が黙って壊れることがありません。
+
+`args` はスカラー配列まで許容し、`env` はスカラーのみに制限するという非対称にしています。
+`args` は配列を「同じフラグを繰り返す」という安全な表現で扱えますが、環境変数は 1 キーに
+1 つの文字列しか持てないため、配列を表現するにはカンマ区切りや `_LENGTH` + 連番キーのような
+細工が要ります。カンマ区切りは値自体にカンマを含むと壊れ、連番キー方式は POSIX shell に
+間接参照（bash の `${!var}` 相当）が無いため `eval` を使った読み出しが必要になり、しかも
+言語ごとに書き味の非対称が大きくなります。`args` に安全な代替がすでにある以上、`env` に
+この複雑さを持ち込む理由は薄いと判断しました。
+
+スキーマ形状が `transport` の制約に反する場合（例: `env` を指定したのにオブジェクト型
+フィールドがある）は、`types` をロードする段階でエラーにします。
 
 ### CI 側の範囲算出
 
@@ -250,9 +344,6 @@ before..after、③ 判定できない・新規ブランチ等 → フォール�
 
 - リポジトリ名・コマンド名
 - insights のリリースと同様にバイナリを配るか、`go install` だけにするか
-- `granularity` を `exempt` と同じ「type の default → checks 側で上書き」というマージ規則に
-  乗せてよいか。`unwanted-files` の per-commit は「後から消しても履歴に残る」という検査の性質に
-  由来するので、上書きを許すこと自体が事故の元になる可能性がある
 - `schema` の `json-schema` 側で実際にどこまで検証するか（型チェックだけか、`pattern` /
   `enum` のような制約まで含めるか）。使う Go 側の JSON Schema 実装の選定も未着手
 - GitLab CI 向けの range アダプタは insights 自身の CI（GitHub Actions のみ）では実地検証できない。
