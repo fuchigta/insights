@@ -71,34 +71,29 @@ Codex 側のロールアウトの構造は公開仕様として文書化され�
 - `test`: Ubuntu / Windows / macOS の 3 OS で `go vet` → `go build ./...` → `go test ./...`
 - `lint`: `gofmt -l ./cmd ./internal` による整形チェックと、`go mod tidy` 実行後の `go.mod` / `go.sum` 差分チェック
 - `race`: `go test -race ./...`（評価の並行実行とストア書き込みの直列化の境界を競合検出器で確認）
-- `commit message`: Conventional Commits の検証（`scripts/check-commit-subject.sh`）
-- `repo guards`: 品質のドリフトを止める検査。ローカルの `commit-msg` フックと同じスクリプトを
-  同じ引数で呼ぶので、手元で通ったものは CI でも通る
-  - `scripts/check-doc-sync.sh`: コードとドキュメントの対応（対応表 `scripts/doc-sync.tsv`）。
+- `commit message`: Conventional Commits の検証。`spotter check --config .spotter.yml commit-subject`
+- `repo guards`: 品質のドリフトを止める検査。ローカルの `commit-msg` フックと同じ `spotter check`
+  を同じ引数で呼ぶので、手元で通ったものは CI でも通る
+  - `doc-sync`: コードとドキュメントの対応（対応表は `.spotter.yml` の `checks.doc-sync.pairs`）。
     片方だけが入っているコミットがあると落ちる。逃げ道は `Doc-Sync: skip <理由>`
-  - `scripts/check-doc-paths.sh`: ドキュメント（`README.md` / `CLAUDE.md` / `docs/*.md` /
-    `.github/*.md`）が名指ししているパスの実在。まだ無いものを例として挙げている参照は
-    `scripts/doc-paths-ignore.txt` に理由付きで除外する
-  - `scripts/check-unwanted-files.sh`: セッションログ・データベース・巨大ファイルの混入。
+  - `doc-paths`: ドキュメント（`README.md` / `CLAUDE.md` / `docs/*.md` / `.github/*.md`）が
+    名指ししているパスの実在。まだ無いものを例として挙げている参照は
+    `.spotter.yml` の `checks.doc-paths.ignore` に列挙して除外する
+  - `unwanted-files`: セッションログ・データベース・巨大ファイルの混入。
     逃げ道は `Unwanted-Files: skip <理由>`
-  - `scripts/check-commit-types.sh`: Conventional Commits の type 一覧が `cliff.toml` /
-    `scripts/check-commit-subject.sh` / `CLAUDE.md` の 3 箇所で一致しているか。
-    1 箇所だけに足すと、通るのにリリースノートで「その他」に落ちる
+  - `commit-types`: Conventional Commits の type 一覧が `cliff.toml` / `scripts/check-commit-subject.sh`
+    （※現在は `.spotter.yml` の `checks.commit-subject.allowed_types`）/ `CLAUDE.md` の
+    3 箇所で一致しているか。1 箇所だけに足すと、通るのにリリースノートで「その他」に落ちる
 - `spotter test`: `spotter/`（insights とは別の Go module）を Ubuntu / Windows / macOS
   の 3 OS で `go vet` → `go build ./...` → `go test ./...`。別 module のためルートの
   `test` の対象に含まれず、ここで別途確認する
 - `spotter format & tidy`: `spotter/` の `gofmt -l .` と `go mod tidy` 差分チェック
-- `spotter (影運用)`: 上記 5 つの検査を汎用ツールへ切り出す作業
-  （[docs/hooks-extraction.md](hooks-extraction.md)）の一環。`spotter/` をビルドし、
-  `.spotter.yml` の設定で同じ範囲に対して実行する。
-  `continue-on-error: true` なので失敗しても PR はブロックされない。旧来の
-  `scripts/check-*.sh` と結果が一致し続けることを見届けてから、`repo guards` /
-  `commit message` をこちらの呼び出しに置き換える
 
 これらの検査は insights の題材にほとんど依存しておらず、他のプロジェクトでもそのまま欲しくなります。
 別リポジトリの再利用可能なツール `spotter`（フックの設置 + フックから呼ばれる CLI）へ切り出す
-案を [docs/hooks-extraction.md](hooks-extraction.md) に置いてあります。`spotter/` として
-insights の中で作り切ってから、コミット履歴を持たずに新規リポジトリへコピーする方針です。
+設計を [docs/hooks-extraction.md](hooks-extraction.md) に置いてあります。`spotter/` として
+insights の中で作り切ってから、コミット履歴を持たずに新規リポジトリへコピーする方針で、
+検査の実装自体は既にこちらへ移行済みです（旧 `scripts/check-*.sh` は削除済み）。
 
 ### spotter のリリース
 

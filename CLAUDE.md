@@ -68,17 +68,18 @@ CI は Linux / macOS / Windows の 3 環境で上記を実行し、競合検出�
 ## ドキュメントの対応表
 
 コードとドキュメントの片方だけを直して、もう片方が古いまま残るのを機械で止めている。
-対応は `scripts/doc-sync.tsv` に「コードのパス → 一緒に直すドキュメント」として書いてあり、
-`.githooks/commit-msg` がコミット時に、CI の `doc sync` ジョブがコミット単位で検査する
-（コード側だけが入っていれば拒否する）。
+対応は `.spotter.yml` の `checks.doc-sync.pairs` に「コードのパス → 一緒に直すドキュメント」
+として書いてあり、`.githooks/commit-msg` がコミット時に、CI の `repo guards` ジョブが
+コミット単位で検査する（コード側だけが入っていれば拒否する）。検査の実体は `spotter`
+（`spotter/`、insights とは別の Go module。設計は [docs/hooks-extraction.md](docs/hooks-extraction.md)）。
 
-**ドキュメントを増やしたら、対応するコードの場所を `scripts/doc-sync.tsv` に 1 行足すこと。**
+**ドキュメントを増やしたら、対応するコードの場所を `.spotter.yml` の `pairs` に 1 行足すこと。**
 表に載っていないドキュメントは検査されない＝誰にも気付かれずに陳腐化する。
 
-- 3 列目に正規表現を書くと、その差分行に一致したときだけ発火する。ファイルの一部だけが
+- `when` に正規表現を書くと、その差分行に一致したときだけ発火する。ファイルの一部だけが
   ドキュメントと対応している場合（例: `internal/cli/*.go` のうちコマンド定義の行だけ）に使う
 - `*_test.go` は常に対象外。テストは利用者に見える面を定義しないため
-- 発火が過剰・不足していると感じたら、我慢して回避し続けずに表のほうを直す
+- 発火が過剰・不足していると感じたら、我慢して回避し続けずに `pairs` のほうを直す
 
 ドキュメントに影響しない変更は、**コミットメッセージの本文**に次の行を入れて外す。
 
@@ -95,10 +96,10 @@ Doc-Sync: skip 設定項目は増やしていない（内部のリファクタ�
 
 ## コミット時に走る検査
 
-`.githooks/commit-msg` が複数の検査をまとめて実行する（1 つ失敗しても残りは走る。直すたびに
-次の失敗が出てくるとフックを疎まれるため）。CI の `repo guards` ジョブが同じスクリプトを同じ
-引数で呼ぶので、**手元で通ったものは CI でも通る**。何を見ているかの一覧は
-[docs/development.md](docs/development.md) にある。
+`.githooks/commit-msg` が `spotter check` を呼び、複数の検査をまとめて実行する（1 つ失敗しても
+残りは走る。直すたびに次の失敗が出てくるとフックを疎まれるため）。CI の `repo guards` /
+`commit message` ジョブが同じ `spotter check` を同じ引数で呼ぶので、**手元で通ったものは
+CI でも通る**。何を見ているかの一覧は [docs/development.md](docs/development.md) にある。
 
 逃げ道はすべてコミットメッセージ本文のトレーラで、理由を添えて書く。
 
@@ -107,8 +108,8 @@ Doc-Sync: skip 設定項目は増やしていない（内部のリファクタ�
 Unwanted-Files: skip 検証用の最小サンプルとして意図的に追加
 ```
 
-検査スクリプトを足したり挙動を変えたりしたら、`docs/development.md` の一覧も直すこと
-（対応表で強制している）。
+検査（`.spotter.yml` の `checks`）を足したり挙動を変えたりしたら、`docs/development.md` の
+一覧も直すこと（対応表で強制している）。
 
 CI で落ちたときの直し方は検査によって違う。`doc sync` は PR 全体をひとまとめに見るので
 **ドキュメントを直すコミットを足せば通る**。混入の検査はコミット単位なので、後から消しても
@@ -149,9 +150,10 @@ CI で落ちたときの直し方は検査によって違う。`doc sync` は PR
 
 ## spotter を切り出すまでの過渡期のルール
 
-フック群（`.githooks` / `scripts/check-*.sh`）を汎用ツール `spotter` として外部リポジトリへ切り出す
-計画がある（設計は [docs/hooks-extraction.md](docs/hooks-extraction.md)）。実装は**このリポジトリの
-中で作り切ってから、コミット履歴を持たずに新規リポジトリへコピーする**方針で進める。以下は
+フック群（`.githooks/commit-msg` から呼ぶ検査）を汎用ツール `spotter` として外部リポジトリへ
+切り出す計画がある（設計は [docs/hooks-extraction.md](docs/hooks-extraction.md)）。実装は
+**このリポジトリの中で作り切ってから、コミット履歴を持たずに新規リポジトリへコピーする**方針で
+進める（`.githooks/commit-msg` は既に `spotter check` を呼ぶよう切り替え済み）。以下は
 切り出しが終わるまでの過渡期限定のルールで、**切り出しが完了したらこの節ごと削除する**。
 
 - **配置は `spotter/` 直下、独立した Go module にする。** 自分の `go.mod` を持たせ、
@@ -165,8 +167,8 @@ CI で落ちたときの直し方は検査によって違う。`doc sync` は PR
   規約は insights 固有のものだが、`spotter` は他プロジェクトでも使う汎用ツールなので対象外にする。
   コード中のコメントは日本語のままでよい（開発者向けであり、insights の他コードと同じ規約に従う）
 - **コミット規約・検査は insights と共通のまま。** `spotter/` の変更も Conventional Commits に従い、
-  scope は `spotter` を使う。ドキュメントを増やした場合は通常どおり `scripts/doc-sync.tsv` に
-  対応行を足す
+  scope は `spotter` を使う。ドキュメントを増やした場合は通常どおり `.spotter.yml` の
+  `checks.doc-sync.pairs` に対応行を足す
 - **`spotter/` は別 module なので、ルートの `go test ./...` には含まれない。** コミット前には
   `spotter` ディレクトリの中でも同じ 3 つ（`gofmt -l .` / `go vet ./...` / `go test ./...`）を
   個別に実行すること
