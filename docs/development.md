@@ -86,9 +86,8 @@ Codex 側のロールアウトの構造は公開仕様として文書化され�
     1 箇所だけに足すと、通るのにリリースノートで「その他」に落ちる
 
 これらの検査の実体は `spotter`（[github.com/fuchigta/spotter](https://github.com/fuchigta/spotter)）です。
-insights の題材にほとんど依存しない汎用ツールとして、いったん `spotter/` に insights の中で
-作り切ってから、コミット履歴を持たずに切り出しました（経緯は [docs/hooks-extraction.md](hooks-extraction.md)）。
-insights 側にはもうコードは無く、`repo guards` / `commit message` ジョブが CI 内で
+insights の題材にほとんど依存しない汎用ツールとして切り出しており、insights 側にはもう
+コードは無く、`repo guards` / `commit message` ジョブが CI 内で
 GitHub Release からバイナリを取得して呼び出すだけです。バージョンは
 `.github/workflows/ci.yml` の `SPOTTER_VERSION`（CI 用）と `.spotter.yml` の
 `required_version`（手元で古いバイナリを使っていないかの下限チェック。満たさない場合は

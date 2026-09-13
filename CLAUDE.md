@@ -71,8 +71,7 @@ CI は Linux / macOS / Windows の 3 環境で上記を実行し、競合検出�
 対応は `.spotter.yml` の `checks.doc-sync.pairs` に「コードのパス → 一緒に直すドキュメント」
 として書いてあり、`.githooks/commit-msg` がコミット時に、CI の `repo guards` ジョブが
 コミット単位で検査する（コード側だけが入っていれば拒否する）。検査の実体は外部ツール
-`spotter`（[github.com/fuchigta/spotter](https://github.com/fuchigta/spotter)。
-経緯は [docs/hooks-extraction.md](docs/hooks-extraction.md) 参照）。
+`spotter`（[github.com/fuchigta/spotter](https://github.com/fuchigta/spotter)）。
 
 **ドキュメントを増やしたら、対応するコードの場所を `.spotter.yml` の `pairs` に 1 行足すこと。**
 表に載っていないドキュメントは検査されない＝誰にも気付かれずに陳腐化する。
@@ -155,7 +154,6 @@ CI で落ちたときの直し方は検査によって違う。`doc sync` は PR
 を呼んでいる。insights 側にはコードは無く、`.github/workflows/ci.yml` の `SPOTTER_VERSION` と
 `.spotter.yml` の `required_version` で参照するリリースバージョンを固定している
 （自動追従にしていない。spotter 側のリリースで insights の CI が意図せず影響を受けないため）。
-経緯は [docs/hooks-extraction.md](docs/hooks-extraction.md) を参照。
 
 ## 改行コード
 
