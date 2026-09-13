@@ -46,16 +46,18 @@ Windows 対応）を延々と面倒見ることになります。一方で、既
 
 ## 3. CLI の形（案）
 
-リポジトリ名・コマンド名は未決です。ここでは仮に `guards` と書きます。
+リポジトリ名・コマンド名は `spotter` に決定しました。「コーディングエージェントが自律的に作業する（＝コミットする）のを、
+致命的な失敗の直前で支える」という役割を、ジムのスポッター（補助者）の比喩で表しています。「guardrail」ほど一般名詞化して
+おらず、LLM 出力検証で知られる既存 OSS（Guardrails AI）との衝突も避けられます。
 
 ```
-guards install [--print]    # core.hooksPath を設定する / 既存フックへ追記する
+spotter install [--print]    # core.hooksPath を設定する / 既存フックへ追記する
                             # --print は呼び出し行だけを出す（他のランナーに貼る用）
-guards check  --message <ファイル>   # ステージ済みの変更（commit-msg フック）
-guards check  --range <git の範囲>   # 範囲（CI）
-guards check  doc-sync --range ...   # 検査を 1 つだけ
-guards range  --event pull_request   # CI 用の範囲算出（後述）
-guards doctor                        # 有効な検査の一覧、フックが有効化されているか
+spotter check  --message <ファイル>   # ステージ済みの変更（commit-msg フック）
+spotter check  --range <git の範囲>   # 範囲（CI）
+spotter check  doc-sync --range ...   # 検査を 1 つだけ
+spotter range  --event pull_request   # CI 用の範囲算出（後述）
+spotter doctor                        # 有効な検査の一覧、フックが有効化されているか
 ```
 
 `check` は**1 つ失敗しても残りを走らせ、終了コードだけを集約**します（直すたびに次の失敗が出てくると
@@ -164,6 +166,12 @@ checks.<key>.exempt.<field>
 `types.<name>.default.granularity` で決め、そちらは上書き不可というルールが組み込み型と揃います
 （checks 側からは変更できない値、という点で組み込み・command 型とも共通）。
 
+`doc-paths` と `consistency` は `squashed` / `per-commit` のどちらでもなく、3 つ目の値
+`worktree` を持ちます。両方とも git の差分ではなく**現在の作業ツリーそのもの**を見る検査で、
+staged/range の指定に関わらず 1 回だけ実行します。コミットメッセージに依存しないため、
+免除トレーラの仕組み自体を持ちません（`doc-paths` の元のシェルスクリプトにもスキップの
+逃げ道が無いことと対応します）。
+
 #### 組み込み type とのキー衝突はエラーにする
 
 `types` に組み込み type と同名（例: `doc-sync`）のエントリを書けるのは `default` を上書きする
@@ -199,6 +207,13 @@ type SchemaConfig struct {
     JSONSchema *jsonschema.Schema   `yaml:"json-schema,omitempty"`
 }
 ```
+
+`json-schema` 側の検証は型チェックだけでなく `pattern` / `enum` のような制約まで含めます。
+`simple` 記法との差が「ネストできるかどうか」だけになってしまうと、フル記法を用意した意味が
+薄れるためです。実装には **`santhosh-tekuri/jsonschema`（v6）を使います**。依存ゼロの pure Go
+実装で、Draft 2020-12 まで対応しており、`kubeconform` など他ツールでの採用実績もあります。
+`xeipuuv/gojsonschema` は定番ですが Draft-07 までしか対応せず更新頻度も落ちているため、
+`schema` に将来新しい制約を足す余地を残す観点で見送りました。
 
 ### `command` 型の入出力契約
 
@@ -271,11 +286,11 @@ types:
 
 `.github/workflows/ci.yml` にある「PR なら `origin/<base>..HEAD`、push なら `before..sha`、
 比較対象が無ければ `-1 HEAD`」の分岐は、どのプロジェクトでもそのままコピペされる部分です。
-`guards range` として持たせると、CI 側の記述が `guards check --range "$(guards range)"` まで縮みます。
+`spotter range` として持たせると、CI 側の記述が `spotter check --range "$(spotter range)"` まで縮みます。
 地味ですが、導入の手間に一番効きます。
 
 **組み込みで自動検出するのは GitHub Actions と GitLab CI（セルフホスト含む）の 2 つに限定します。**
-他の CI は将来的にも組み込みで持たず、`guards check --range <from>..<to>` に自分で組み立てた
+他の CI は将来的にも組み込みで持たず、`spotter check --range <from>..<to>` に自分で組み立てた
 範囲を渡してもらう形にします。CI ごとの検出ロジックは実機でしか検証しにくく、増やすほど
 「Go を選んだのはテストを書けるから」という利点を削るためです。
 
@@ -296,6 +311,13 @@ before..after、③ 判定できない・新規ブランチ等 → フォール�
 実装前に `.github/workflows/ci.yml` の該当分岐を読み直して、insights 側がすでにこのケースを
 どう扱っているか確認してから仕様に落とします。
 
+**GitLab CI アダプタは実機検証を待たずに、公式ドキュメント（[Predefined variables](https://docs.gitlab.com/ci/variables/predefined_variables/)）
+に基づいて実装します。** insights 自身の CI は GitHub Actions のみで GitLab CI 環境を持たないため、
+実地検証できる状態を待っていると着手できません。GitHub Actions アダプタで固めた「共通ロジック＋
+環境変数アダプタ」という構成なら GitLab 側だけ後から直しても影響範囲が閉じるので、まず公式仕様
+どおりに実装し、実際に GitLab CI を使う環境に導入されたタイミングで動作確認・修正する、という
+順序で進めます。
+
 ## 4. 実装で詰まるところ
 
 見落とすと「移植したら判定が変わっていた」という形で出るものを、先に書いておきます。
@@ -307,13 +329,20 @@ before..after、③ 判定できない・新規ブランチ等 → フォール�
 - **言語は Go を推す。** 単一バイナリで配れること、Windows で git bash を前提にしないこと、
   検査そのものにテストを書けること（現在のシェルスクリプトは実質テストが無い）が理由です。
   依存する外部コマンドは `git` だけに保ちます。
-- **免除トレーラに理由を必須にするか。** 現在の正規表現は `Doc-Sync: skip` だけでも通ります。
-  理由なしの免除が溜まると検査の意味が薄れるので、新ツールでは理由の空文字を拒否する案があります
-  （挙動が変わるので、移行時に既存履歴との整合を確認する必要あり）。
+- **免除トレーラの理由は必須にする。** 現在の正規表現は `Doc-Sync: skip` だけでも通ってしまうが、
+  CLAUDE.md 自体が「理由を添えて書く」運用を前提にしている以上、理由の空文字は新ツールでは拒否する。
+  現行のシェルスクリプトとは挙動が変わる（＝理由なしの `skip` は通らなくなる）ため、移行時（§6）に
+  過去の免除コミットとの整合は問題にならない（`spotter` は今後のコミットにのみ効くため）が、
+  影運用の段階で新ツールが拒否したメッセージが無いか確認する。
 
 ## 5. バイナリが無い手元でどうするか
 
-フックから外部バイナリを呼ぶ以上、「入れていない人の手元」が必ず発生します。
+**配布はバイナリも作る**（`go install` だけにはしない）ことに決めました。insights と同じリリース
+パイプライン（`cliff.toml` ベース）を流用でき、追加の運用コストがほぼゼロだからです。バイナリを
+配ることで、手元に Go が無い開発者でも導入できます（Go が無いと `go install` すら選べず、
+下の「無ければ警告して素通り」というフォールバックに全員が落ちてしまう）。
+
+フックから外部バイナリを呼ぶ以上、それでも「入れていない人の手元」は必ず発生します。
 
 | 案 | 評価 |
 |---|---|
@@ -326,13 +355,19 @@ before..after、③ 判定できない・新規ブランチ等 → フォール�
 
 ## 6. 移行の段取り（insights 側）
 
+**新規リポジトリから作り始めるのではなく、insights の中で作り切ってから切り出します。** 別々の
+リポジトリで並行開発すると行き来のコストがかかるうえ、insights のフックに実際に差し込んで
+使いながら直せるという利点を捨てることになるためです。切り出し自体は最後の 1 回だけ、
+コミット履歴を持たずに行います（過渡期のルールは [CLAUDE.md](../CLAUDE.md) 参照）。
+
 一度に置き換えると、判定が変わったことに気付けません。**影運用で出力を突き合わせてから**
 切り替えます。
 
-1. 新リポジトリで `doc-sync` と `unwanted-files` を実装する（トレーラと範囲の意味論を含む）
+1. insights リポジトリ内に独立した Go module `spotter/` を作り、そこで `doc-sync` と
+   `unwanted-files` を実装する（トレーラと範囲の意味論を含む）。`internal/` には依存しない
 2. insights の CI で**新旧の両方**を走らせ、同じ範囲に対する結果が一致することを確認する
-3. 一致したら `.githooks/commit-msg` と `.github/workflows/ci.yml` を置き換え、
-   `scripts/check-doc-sync.sh` / `scripts/check-unwanted-files.sh` と
+3. 一致したら `.githooks/commit-msg` と `.github/workflows/ci.yml` を `spotter` 呼び出しに
+   置き換え、`scripts/check-doc-sync.sh` / `scripts/check-unwanted-files.sh` と
    `scripts/doc-sync.tsv` を削除する。`CLAUDE.md` と [docs/development.md](development.md) の
    記述も同時に直す（対応表の書式が変わるため）
 4. `commit-subject` と `doc-paths` を同じ手順で移す
@@ -340,16 +375,24 @@ before..after、③ 判定できない・新規ブランチ等 → フォール�
    （仮称 `consistency`）に一般化できるかを見てから決める。できなければ `command` を持つ
    type のまま残す
 
+   → 一般化できたため `consistency` として実装済み。`sources` に
+   `{file, line, extract, split}` の列を書き、ファイルごとに「対象行を絞る正規表現
+   （省略可）」「値を取り出す正規表現（キャプチャグループ 1 つ必須）」「取り出した値を
+   さらに分割する区切り文字（省略可、`check-commit-subject.sh` の `PATTERN` から
+   `feat|fix|...` を割るのに使う）」を指定する。全 `sources` の組み合わせで集合を
+   突き合わせ、食い違いがあれば差分を報告する。`doc-paths` と同じ理由（git の差分ではなく
+   現在の作業ツリーそのものを見る）で `granularity` は `worktree` 固定。
+6. 5 つの検査すべてが `spotter/` 側に揃い、insights のフック・CI が完全に `spotter` 呼び出しに
+   置き換わったら切り出す。新規リポジトリを作り、`spotter/` の中身をそのままコピーして
+   module path を最終的なものに付け替えるだけでよい（コミット履歴は持っていかない）
+7. 切り出し後、insights 側の `spotter/` ディレクトリと `CLAUDE.md` の過渡期ルール節を削除し、
+   `spotter` を外部ツールとして `spotter install` で導入し直す
+
 ## 7. 決めていないこと
 
-- リポジトリ名・コマンド名
-- insights のリリースと同様にバイナリを配るか、`go install` だけにするか
-- `schema` の `json-schema` 側で実際にどこまで検証するか（型チェックだけか、`pattern` /
-  `enum` のような制約まで含めるか）。使う Go 側の JSON Schema 実装の選定も未着手
-- GitLab CI 向けの range アダプタは insights 自身の CI（GitHub Actions のみ）では実地検証できない。
-  導入する会社環境での動作確認が前提になる
 - `doc-sync` の `pairs` のような行指向で見たい対応表を YAML の中でどこまで読みやすく保てるか
   （TSV は diff が読みやすいという利点があったが、YAML への統一自体はここまでの検討で
-  自然に前提になっている）
+  自然に前提になっている）。これは事前に仕様を詰めるより、実装しながら実際の対応表を
+  書いてみて判断する
 
 [← README に戻る](../README.md)
