@@ -150,6 +150,68 @@ jobs:
           echo "対象範囲: ${range}"
           git log --format=%s "${range}" | ./scripts/check-commit-subject.sh
 
+  # spotter/ は insights とは別の Go module なので、ルートの test/lint ジョブの
+  # 対象に含まれない（go list ./... で検出されない）。切り出し前に Windows/macOS
+  # でも動作確認できるよう、同じ形で 3 OS マトリクスにしておく。
+  spotter-test:
+    name: spotter test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: spotter/go.mod
+          cache: true
+          cache-dependency-path: spotter/go.sum
+
+      - name: go vet
+        working-directory: spotter
+        run: go vet ./...
+
+      - name: go build
+        working-directory: spotter
+        run: go build ./...
+
+      - name: go test
+        working-directory: spotter
+        run: go test ./...
+
+  spotter-lint:
+    name: spotter format & tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: spotter/go.mod
+          cache: true
+          cache-dependency-path: spotter/go.sum
+
+      - name: gofmt
+        working-directory: spotter
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt で整形されていないファイルがあります:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go mod tidy
+        working-directory: spotter
+        run: |
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "go mod tidy による差分があります。ローカルで go mod tidy を実行してコミットしてください。"
+            exit 1
+          fi
+
   # docs/hooks-extraction.md §6 の影運用。scripts/check-*.sh を置き換える spotter
   # （spotter/ ディレクトリ、insights とは別の Go module）の結果を、既存の検査
   # （guards / commit-lint）と同じ範囲に対して確認する。continue-on-error なので

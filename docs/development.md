@@ -84,9 +84,13 @@ Codex 側のロールアウトの構造は公開仕様として文書化され�
   - `scripts/check-commit-types.sh`: Conventional Commits の type 一覧が `cliff.toml` /
     `scripts/check-commit-subject.sh` / `CLAUDE.md` の 3 箇所で一致しているか。
     1 箇所だけに足すと、通るのにリリースノートで「その他」に落ちる
+- `spotter test`: `spotter/`（insights とは別の Go module）を Ubuntu / Windows / macOS
+  の 3 OS で `go vet` → `go build ./...` → `go test ./...`。別 module のためルートの
+  `test` の対象に含まれず、ここで別途確認する
+- `spotter format & tidy`: `spotter/` の `gofmt -l .` と `go mod tidy` 差分チェック
 - `spotter (影運用)`: 上記 5 つの検査を汎用ツールへ切り出す作業
-  （[docs/hooks-extraction.md](hooks-extraction.md)）の一環。`spotter/`（insights とは
-  別の Go module）をビルドし、`.spotter.yml` の設定で同じ範囲に対して実行する。
+  （[docs/hooks-extraction.md](hooks-extraction.md)）の一環。`spotter/` をビルドし、
+  `.spotter.yml` の設定で同じ範囲に対して実行する。
   `continue-on-error: true` なので失敗しても PR はブロックされない。旧来の
   `scripts/check-*.sh` と結果が一致し続けることを見届けてから、`repo guards` /
   `commit message` をこちらの呼び出しに置き換える
