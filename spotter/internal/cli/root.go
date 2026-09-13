@@ -21,6 +21,7 @@ func NewRootCommand() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.AddCommand(newCheckCommand())
+	root.AddCommand(newRangeCommand())
 	return root
 }
 
