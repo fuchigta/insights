@@ -1,22 +1,16 @@
 #!/bin/sh
-# コミット時の検査をまとめて走らせる。
+# コミット時の検査をまとめて実行する。
 # 有効化: git config core.hooksPath .githooks
 #
-# 逃げ道（Doc-Sync: skip / Unwanted-Files: skip）はコミットメッセージに書くため、
-# メッセージが確定する commit-msg で検査する（pre-commit ではまだ読めない）。
+# 検査の実体・設定は spotter（spotter/、insights とは別の Go module）に集約されている。
+# 対応表・拒否ルール・許可 type 一覧などは .spotter.yml（既定の設定ファイル名）にある。
 #
-# set -e にしないのは、最初の 1 つで止めずに全部の問題をまとめて出すため。
-# 直すたびに次の失敗が出てくるのは、フックを疎まれる原因になる。
-set -u
-
-msg=$1
-status=0
-
-# git はフックをリポジトリのルートで実行する。
-scripts/check-commit-subject.sh "$(head -n 1 "$msg")" || status=1
-scripts/check-doc-sync.sh --message "$msg" || status=1
-scripts/check-doc-paths.sh || status=1
-scripts/check-commit-types.sh || status=1
-scripts/check-unwanted-files.sh --message "$msg" || status=1
-
-exit "$status"
+# 以下は `spotter install` が生成するものと同じ内容（マーカーも含めて揃えることで
+# `spotter doctor` が正しく「設置済み」と認識できるようにしている）。
+# --- spotter (managed) begin ---
+if command -v spotter >/dev/null 2>&1; then
+  spotter check --message "$1" || exit 1
+else
+  echo "spotter: コマンドが見つからないため検査をスキップします" >&2
+fi
+# --- spotter (managed) end ---

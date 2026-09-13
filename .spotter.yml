@@ -1,16 +1,14 @@
 # insights 自身の検査設定。
 #
-# docs/hooks-extraction.md §6 の移行段取りに従い、いまは CI での影運用専用。
-# scripts/check-*.sh・.githooks/commit-msg を置き換えるのは、この設定に基づく
-# spotter check の結果が既存のシェルスクリプトと十分な期間一致してから
-# （そのタイミングで scripts/doc-sync.tsv・doc-paths-ignore.txt はこのファイルへ
-# 統合され、削除される）。
+# .githooks/commit-msg と .github/workflows/ci.yml（repo guards / commit message
+# ジョブ）が spotter check --config .spotter.yml を通じてこのファイルを読む。
+# ドキュメントの対応表・拒否ルール・許可 type 一覧はここに集約されている
+# （旧 scripts/doc-sync.tsv・scripts/doc-paths-ignore.txt は削除済み。
+# docs/hooks-extraction.md §6 参照）。
 
 checks:
   doc-sync:
     type: doc-sync
-    # scripts/doc-sync.tsv と同じ内容。対応を増やすときは両方に足すのではなく、
-    # 影運用が終わって切り替えた後にこちらだけを直す。
     pairs:
       - paths: 'internal/cli/*.go'
         doc: README.md
@@ -80,9 +78,19 @@ checks:
   doc-paths:
     type: doc-paths
     # docs 省略時の既定（README.md / CLAUDE.md / docs/*.md / .github/*.md）で
-    # scripts/check-doc-paths.sh と同じ対象になる。
+    # 旧 scripts/check-doc-paths.sh と同じ対象になる。
     ignore:
       - internal/source/codex
+      # docs/hooks-extraction.md は移行の経緯を記した設計メモで、削除済みの
+      # 旧シェルスクリプト・対応表を歴史的な参照として書いている（現存しない）。
+      - scripts/check-doc-sync.sh
+      - scripts/doc-sync.tsv
+      - scripts/check-unwanted-files.sh
+      - scripts/check-doc-paths.sh
+      - scripts/doc-paths-ignore.txt
+      - scripts/check-commit-subject.sh
+      - scripts/check-commit-types.sh
+      - scripts/check-*.sh
 
   commit-subject:
     type: commit-subject
@@ -90,15 +98,17 @@ checks:
 
   commit-types:
     type: consistency
-    # scripts/check-commit-types.sh が突き合わせていた 3 箇所と同じ抽出規則。
+    # 旧 scripts/check-commit-types.sh が突き合わせていた 3 箇所のうち、
+    # 許可 type 一覧は scripts/check-commit-subject.sh 削除後は
+    # checks.commit-subject.allowed_types（このファイル自身）に移っている。
     sources:
       - file: cliff.toml
         line: 'message = .\^[A-Za-z]+.'
         extract: '\^([A-Za-z]+)'
-      - file: scripts/check-commit-subject.sh
-        line: '^PATTERN='
-        extract: '\(([a-zA-Z|]+)\)'
-        split: '|'
+      - file: .spotter.yml
+        line: '^\s*allowed_types:'
+        extract: '\[([a-zA-Z, ]+)\]'
+        split: ','
       - file: CLAUDE.md
         line: '^\| `[a-zA-Z]+` \|'
         extract: '`([a-zA-Z]+)`'

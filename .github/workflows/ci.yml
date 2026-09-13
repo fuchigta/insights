@@ -90,37 +90,38 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: spotter/go.mod
+          cache: true
+          cache-dependency-path: spotter/go.sum
+
+      - name: spotter のビルド
+        run: |
+          mkdir -p "$RUNNER_TEMP/spotter-bin"
+          cd spotter
+          go build -o "$RUNNER_TEMP/spotter-bin/spotter" ./cmd/spotter
+          echo "$RUNNER_TEMP/spotter-bin" >> "$GITHUB_PATH"
+
       # ローカルの commit-msg フックはすり抜けうる（フックは clone に含まれず、
       # 有効化も手動のため）。CI を最後の歯止めにする。逃げ道はコミットメッセージの
       # トレーラなので、ローカルで通した判断はここでもそのまま通る。
       - name: コミット範囲の算出
-        env:
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
-          BASE: ${{ github.base_ref }}
-        run: |
-          if [ "$EVENT" = "pull_request" ]; then
-            range="origin/${BASE}..HEAD"
-          elif [ -n "${BEFORE:-}" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            range="${BEFORE}..${GITHUB_SHA}"
-          else
-            # 新しいブランチの初回 push など、比較対象が無い場合は先頭のみ見る。
-            range="-1 HEAD"
-          fi
-          echo "対象範囲: ${range}"
-          echo "RANGE=${range}" >> "$GITHUB_ENV"
+        run: echo "RANGE=$(spotter range)" >> "$GITHUB_ENV"
 
       - name: コードとドキュメントの対応
-        run: ./scripts/check-doc-sync.sh "$RANGE"
+        run: spotter check --config .spotter.yml doc-sync --range "$RANGE"
 
+      # doc-paths / commit-types は現在の作業ツリーそのものを見る検査
+      # （check.GranularityWorktree）なので、範囲の指定は不要。
       - name: ドキュメントが指すパスの実在
-        run: ./scripts/check-doc-paths.sh
+        run: spotter check --config .spotter.yml doc-paths
 
       - name: コミットしてはいけないものの混入
-        run: ./scripts/check-unwanted-files.sh "$RANGE"
+        run: spotter check --config .spotter.yml unwanted-files --range "$RANGE"
 
       - name: コミット type 一覧の整合
-        run: ./scripts/check-commit-types.sh
+        run: spotter check --config .spotter.yml commit-types
 
   commit-lint:
     name: commit message
@@ -131,24 +132,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: spotter/go.mod
+          cache: true
+          cache-dependency-path: spotter/go.sum
+
+      - name: spotter のビルド
+        run: |
+          mkdir -p "$RUNNER_TEMP/spotter-bin"
+          cd spotter
+          go build -o "$RUNNER_TEMP/spotter-bin/spotter" ./cmd/spotter
+          echo "$RUNNER_TEMP/spotter-bin" >> "$GITHUB_PATH"
+
       # ローカルの commit-msg フックはすり抜けうる（フックは clone に含まれず、
       # 有効化も手動のため）。CI を最後の歯止めにする。
       - name: Conventional Commits の検証
-        env:
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
-          BASE: ${{ github.base_ref }}
-        run: |
-          if [ "$EVENT" = "pull_request" ]; then
-            range="origin/${BASE}..HEAD"
-          elif [ -n "${BEFORE:-}" ] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            range="${BEFORE}..${GITHUB_SHA}"
-          else
-            # 新しいブランチの初回 push など、比較対象が無い場合は先頭のみ見る。
-            range="-1"
-          fi
-          echo "対象範囲: ${range}"
-          git log --format=%s "${range}" | ./scripts/check-commit-subject.sh
+        run: spotter check --config .spotter.yml commit-subject --range "$(spotter range)"
 
   # spotter/ は insights とは別の Go module なので、ルートの test/lint ジョブの
   # 対象に含まれない（go list ./... で検出されない）。切り出し前に Windows/macOS
@@ -211,36 +211,3 @@ jobs:
             echo "go mod tidy による差分があります。ローカルで go mod tidy を実行してコミットしてください。"
             exit 1
           fi
-
-  # docs/hooks-extraction.md §6 の影運用。scripts/check-*.sh を置き換える spotter
-  # （spotter/ ディレクトリ、insights とは別の Go module）の結果を、既存の検査
-  # （guards / commit-lint）と同じ範囲に対して確認する。continue-on-error なので
-  # 失敗してもこのジョブが PR をブロックすることは無い。一致が続くことを見届けてから
-  # guards / commit-lint を spotter 呼び出しに置き換える。
-  spotter-shadow:
-    name: spotter (影運用)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: spotter/go.mod
-          cache: true
-          cache-dependency-path: spotter/go.sum
-
-      - name: spotter のビルド
-        run: |
-          mkdir -p "$RUNNER_TEMP/spotter-bin"
-          cd spotter
-          go build -o "$RUNNER_TEMP/spotter-bin/spotter" ./cmd/spotter
-          echo "$RUNNER_TEMP/spotter-bin" >> "$GITHUB_PATH"
-
-      - name: 全検査の実行
-        run: |
-          range="$(spotter range)"
-          echo "spotter range: ${range}"
-          spotter check --config .spotter.yml --range "${range}"

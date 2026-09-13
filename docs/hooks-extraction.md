@@ -378,7 +378,14 @@ before..after、③ 判定できない・新規ブランチ等 → フォール�
    置き換え、`scripts/check-doc-sync.sh` / `scripts/check-unwanted-files.sh` と
    `scripts/doc-sync.tsv` を削除する。`CLAUDE.md` と [docs/development.md](development.md) の
    記述も同時に直す（対応表の書式が変わるため）
-4. `commit-subject` と `doc-paths` を同じ手順で移す
+
+   → 完了。5 つの検査すべてが揃った段階で、影運用（CI での比較実行）と Windows/macOS
+   での動作確認（`spotter test` マトリクス）を済ませてからまとめて切り替えた。
+   `.githooks/commit-msg` は `spotter check --config .spotter.yml` を呼び、
+   `.github/workflows/ci.yml` の `repo guards` / `commit message` ジョブも同じ呼び出しに
+   置き換わっている。旧シェルスクリプト 5 本と `scripts/doc-sync.tsv` /
+   `scripts/doc-paths-ignore.txt` は削除済み。
+4. `commit-subject` と `doc-paths` を同じ手順で移す（→ 上記と同時に完了）
 5. `check-commit-types.sh` は最後。「ファイル + 抽出正規表現の集合を突き合わせる」汎用検査
    （仮称 `consistency`）に一般化できるかを見てから決める。できなければ `command` を持つ
    type のまま残す
@@ -393,6 +400,9 @@ before..after、③ 判定できない・新規ブランチ等 → フォール�
 6. 5 つの検査すべてが `spotter/` 側に揃い、insights のフック・CI が完全に `spotter` 呼び出しに
    置き換わったら切り出す。新規リポジトリを作り、`spotter/` の中身をそのままコピーして
    module path を最終的なものに付け替えるだけでよい（コミット履歴は持っていかない）
+
+   → 上記が完了したので着手可能。受け皿のリポジトリ（`github.com/fuchigta/spotter`、
+   module path と一致）は作成済み（中身のコピーはこれから）
 7. 切り出し後、insights 側の `spotter/` ディレクトリと `CLAUDE.md` の過渡期ルール節を削除し、
    `spotter` を外部ツールとして `spotter install` で導入し直す
 
