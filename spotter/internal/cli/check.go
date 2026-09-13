@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fuchigta/spotter/internal/check"
+	"github.com/fuchigta/spotter/internal/check/command"
 	"github.com/fuchigta/spotter/internal/check/commitsubject"
 	"github.com/fuchigta/spotter/internal/check/consistency"
 	"github.com/fuchigta/spotter/internal/check/docpaths"
@@ -73,7 +74,7 @@ func runCheck(stdout, stderr io.Writer, configPath, messageFile, rangeExpr, only
 	for _, key := range keys {
 		cc := cfg.Checks[key]
 
-		runner, err := buildRunner(cc)
+		runner, err := buildRunner(cfg, key, cc)
 		if err != nil {
 			return fmt.Errorf("check: checks.%s: %w", key, err)
 		}
@@ -89,7 +90,7 @@ func runCheck(stdout, stderr io.Writer, configPath, messageFile, rangeExpr, only
 		// 免除トレーラの仕組み自体を持たない。
 		var exemptCfg exempt.Config
 		if granularity != check.GranularityWorktree {
-			enable, trailer := config.ResolveExempt(key, cc)
+			enable, trailer := cfg.ResolveExempt(key, cc)
 			exemptCfg = exempt.Config{Enable: enable, Trailer: trailer}
 		}
 
@@ -140,7 +141,7 @@ func selectKeys(cfg *config.Config, only string) ([]string, error) {
 	return keys, nil
 }
 
-func buildRunner(cc config.CheckConfig) (check.Runner, error) {
+func buildRunner(cfg *config.Config, key string, cc config.CheckConfig) (check.Runner, error) {
 	switch cc.Type {
 	case config.TypeDocSync:
 		return docsync.New(cc)
@@ -153,7 +154,9 @@ func buildRunner(cc config.CheckConfig) (check.Runner, error) {
 	case config.TypeConsistency:
 		return consistency.New(cc)
 	default:
-		return nil, fmt.Errorf("未対応の type %q です", cc.Type)
+		// config.Load が既に「types.<type> に command が登録されているか」を検証済み。
+		tc := cfg.Types[cc.Type]
+		return command.New(key, cc, tc)
 	}
 }
 
@@ -171,7 +174,12 @@ func planInvocations(repo *gitutil.Repo, granularity check.Granularity, rangeExp
 		invocations := make([]invocation, 0, len(plans))
 		for _, p := range plans {
 			invocations = append(invocations, invocation{
-				ctx:   check.Context{Root: repoRoot, Source: p.Source, Message: p.Message},
+				ctx: check.Context{
+					Root:    repoRoot,
+					Source:  p.Source,
+					Message: p.Message,
+					Range:   &check.RangeRef{From: p.From, To: p.To},
+				},
 				label: p.Label,
 			})
 		}

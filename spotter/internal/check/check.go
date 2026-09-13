@@ -39,6 +39,16 @@ type Context struct {
 	// 免除トレーラの判定はホスト（cli パッケージ）が済ませてから Run を呼ぶが、
 	// commit-subject のようにメッセージの中身自体を検証したい検査はここから参照する。
 	Message string
+	// Range は staged/range どちらのモードかと、range モードでの生の比較両端。
+	// command 型検査（外部プロセスに --from/--to を渡す必要がある）向け。
+	// staged モードでは nil。
+	Range *RangeRef
+}
+
+// RangeRef は range モードでの比較両端の生の git 参照。
+type RangeRef struct {
+	From string
+	To   string
 }
 
 // Violation は 1 件の検査結果。

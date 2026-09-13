@@ -51,7 +51,7 @@ func runDoctor(stdout io.Writer, configPath string) error {
 	buildFailed := false
 	for _, key := range keys {
 		cc := cfg.Checks[key]
-		runner, err := buildRunner(cc)
+		runner, err := buildRunner(cfg, key, cc)
 		if err != nil {
 			fmt.Fprintf(stdout, "  - %s: エラー（%v）\n", key, err)
 			buildFailed = true

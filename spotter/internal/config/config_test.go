@@ -97,22 +97,37 @@ func TestResolveExempt(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		cfg         Config
 		key         string
 		cc          CheckConfig
 		wantEnable  bool
 		wantTrailer string
 	}{
-		{"既定はキーから生成", "doc-sync", CheckConfig{}, true, "Doc-Sync"},
-		{"ハイフン区切りも大文字化する", "doc-sync-frontend", CheckConfig{}, true, "Doc-Sync-Frontend"},
-		{"enable を上書きできる", "doc-sync", CheckConfig{Exempt: &ExemptConfig{Enable: &falseVal}}, false, "Doc-Sync"},
-		{"trailer を上書きできる", "doc-sync", CheckConfig{Exempt: &ExemptConfig{Enable: &trueVal, Trailer: "Custom"}}, true, "Custom"},
-		{"commit-subject は既定で免除不可", "commit-subject", CheckConfig{Type: TypeCommitSubject}, false, "Commit-Subject"},
-		{"commit-subject でも明示すれば免除できる", "commit-subject", CheckConfig{Type: TypeCommitSubject, Exempt: &ExemptConfig{Enable: &trueVal}}, true, "Commit-Subject"},
+		{"既定はキーから生成", Config{}, "doc-sync", CheckConfig{}, true, "Doc-Sync"},
+		{"ハイフン区切りも大文字化する", Config{}, "doc-sync-frontend", CheckConfig{}, true, "Doc-Sync-Frontend"},
+		{"enable を上書きできる", Config{}, "doc-sync", CheckConfig{Exempt: &ExemptConfig{Enable: &falseVal}}, false, "Doc-Sync"},
+		{"trailer を上書きできる", Config{}, "doc-sync", CheckConfig{Exempt: &ExemptConfig{Enable: &trueVal, Trailer: "Custom"}}, true, "Custom"},
+		{"commit-subject は既定で免除不可", Config{}, "commit-subject", CheckConfig{Type: TypeCommitSubject}, false, "Commit-Subject"},
+		{"commit-subject でも明示すれば免除できる", Config{}, "commit-subject", CheckConfig{Type: TypeCommitSubject, Exempt: &ExemptConfig{Enable: &trueVal}}, true, "Commit-Subject"},
+		{
+			"types.<type>.default.exempt が checks より弱い優先度",
+			Config{Types: map[string]TypeConfig{
+				"my-check": {Command: "./x", Default: &TypeDefault{Granularity: "squashed", Exempt: &ExemptConfig{Enable: &falseVal, Trailer: "MyCheck"}}},
+			}},
+			"my-check-a", CheckConfig{Type: "my-check"}, false, "MyCheck",
+		},
+		{
+			"checks 側の指定は types.default より優先される",
+			Config{Types: map[string]TypeConfig{
+				"my-check": {Command: "./x", Default: &TypeDefault{Granularity: "squashed", Exempt: &ExemptConfig{Enable: &falseVal, Trailer: "MyCheck"}}},
+			}},
+			"my-check-a", CheckConfig{Type: "my-check", Exempt: &ExemptConfig{Enable: &trueVal}}, true, "MyCheck",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			enable, trailer := ResolveExempt(tt.key, tt.cc)
+			enable, trailer := tt.cfg.ResolveExempt(tt.key, tt.cc)
 			if enable != tt.wantEnable || trailer != tt.wantTrailer {
 				t.Errorf("ResolveExempt() = (%v, %q), want (%v, %q)", enable, trailer, tt.wantEnable, tt.wantTrailer)
 			}
