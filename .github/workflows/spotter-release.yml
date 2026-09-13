@@ -1,0 +1,86 @@
+name: Release (spotter)
+
+# spotter-v* タグを push したときだけ動く。spotter/ はまだ insights と同じ
+# リポジトリにあり（docs/hooks-extraction.md §6、切り出しは issue #12）、
+# insights 本体の Release ワークフロー（v* タグ）と同じ名前空間を使うと衝突する
+# ため、spotter- 接頭辞にしている。切り出し後は接頭辞を外して v* に揃える。
+on:
+  push:
+    tags: ["spotter-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64, ext: .exe }
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: spotter/go.mod
+          cache: true
+          cache-dependency-path: spotter/go.sum
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          # main.version には spotter- を外したバージョンだけを埋め込む
+          # （spotter --version や required_version の比較で "spotter-v0.1.0" という
+          # 見慣れない形にしないため）。
+          version="${GITHUB_REF_NAME#spotter-}"
+          out="spotter-${GOOS}-${GOARCH}${{ matrix.ext }}"
+          cd spotter
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${version}" \
+            -o "../dist/${out}" ./cmd/spotter
+          (cd ../dist && sha256sum "${out}" > "${out}.sha256")
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: spotter-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # git-cliff がタグ間の差分を辿るため、履歴を全部持ってくる。
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      # spotter/ 配下の変更だけをリリースノートに含める
+      # （insights 本体の変更まで混ざると意図が読み取れなくなるため）。
+      - name: generate release notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: spotter/cliff.toml
+          args: --latest --strip header --include-path "spotter/**"
+        env:
+          OUTPUT: RELEASE_NOTES.md
+
+      - name: create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --notes-file RELEASE_NOTES.md dist/*

@@ -9,8 +9,11 @@ import (
 	"github.com/fuchigta/spotter/internal/cli"
 )
 
+// version はビルド時に -ldflags "-X main.version=..." で差し替える。
+var version = "dev"
+
 func main() {
-	if err := cli.Execute(); err != nil {
+	if err := cli.Execute(version); err != nil {
 		if !errors.Is(err, cli.ErrCheckFailed) {
 			fmt.Fprintln(os.Stderr, "spotter:", err)
 		}

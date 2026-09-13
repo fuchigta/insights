@@ -62,6 +62,9 @@ func runCheck(stdout, stderr io.Writer, configPath, messageFile, rangeExpr, only
 	if err != nil {
 		return err
 	}
+	if err := checkRequiredVersion(cfg); err != nil {
+		return fmt.Errorf("check: %w", err)
+	}
 
 	keys, err := selectKeys(cfg, only)
 	if err != nil {

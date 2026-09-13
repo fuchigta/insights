@@ -23,6 +23,10 @@ type Config struct {
 	// Types は組み込み type の default 上書き、または command 型（外部コマンド検査）の
 	// 登録に使う。組み込み type は types に書かなくても checks から使える。
 	Types map[string]TypeConfig `yaml:"types,omitempty"`
+	// RequiredVersion は spotter バイナリの下限バージョン（例: "v0.3.0"）。
+	// 手元のバイナリがこれを満たさない場合、spotter は検査を実行せずエラーにする
+	// （internal/version.Satisfies を参照。docs/hooks-extraction.md §5）。
+	RequiredVersion string `yaml:"required_version,omitempty"`
 }
 
 // CheckConfig は 1 つの検査インスタンスの設定。type によって解釈するフィールドが変わる。

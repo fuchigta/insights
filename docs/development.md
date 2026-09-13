@@ -96,6 +96,18 @@ Codex 側のロールアウトの構造は公開仕様として文書化され�
 案を [docs/hooks-extraction.md](hooks-extraction.md) に置いてあります。`spotter/` として
 insights の中で作り切ってから、コミット履歴を持たずに新規リポジトリへコピーする方針です。
 
+### spotter のリリース
+
+`.github/workflows/spotter-release.yml` が `spotter-v*` タグの push で動き、
+Linux / macOS / Windows 向けのバイナリをビルドして GitHub Release を作成します。
+insights 本体の `.github/workflows/release.yml`（`v*` タグ、ルートの `cliff.toml`）とは
+タグの名前空間・設定ファイル（`spotter/cliff.toml`、`--include-path 'spotter/**'` で
+spotter 配下の変更だけをリリースノートに含める）を分けています。切り出し後（issue #12）は
+タグの `spotter-` 接頭辞を外し、insights 本体と同じ形に揃えます。
+
+`.spotter.yml` の `required_version` に下限バージョンを書くと、それを満たさない
+`spotter` では検査を実行させずにエラーで終了します（`spotter/internal/version`）。
+
 #### 落ちたときにどう直すか
 
 CI での見方は検査によって違います。**この違いは意図的です。**
