@@ -149,3 +149,36 @@ jobs:
           fi
           echo "対象範囲: ${range}"
           git log --format=%s "${range}" | ./scripts/check-commit-subject.sh
+
+  # docs/hooks-extraction.md §6 の影運用。scripts/check-*.sh を置き換える spotter
+  # （spotter/ ディレクトリ、insights とは別の Go module）の結果を、既存の検査
+  # （guards / commit-lint）と同じ範囲に対して確認する。continue-on-error なので
+  # 失敗してもこのジョブが PR をブロックすることは無い。一致が続くことを見届けてから
+  # guards / commit-lint を spotter 呼び出しに置き換える。
+  spotter-shadow:
+    name: spotter (影運用)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: spotter/go.mod
+          cache: true
+          cache-dependency-path: spotter/go.sum
+
+      - name: spotter のビルド
+        run: |
+          mkdir -p "$RUNNER_TEMP/spotter-bin"
+          cd spotter
+          go build -o "$RUNNER_TEMP/spotter-bin/spotter" ./cmd/spotter
+          echo "$RUNNER_TEMP/spotter-bin" >> "$GITHUB_PATH"
+
+      - name: 全検査の実行
+        run: |
+          range="$(spotter range)"
+          echo "spotter range: ${range}"
+          spotter check --config .spotter.yml --range "${range}"

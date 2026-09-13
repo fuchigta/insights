@@ -84,10 +84,17 @@ Codex 側のロールアウトの構造は公開仕様として文書化され�
   - `scripts/check-commit-types.sh`: Conventional Commits の type 一覧が `cliff.toml` /
     `scripts/check-commit-subject.sh` / `CLAUDE.md` の 3 箇所で一致しているか。
     1 箇所だけに足すと、通るのにリリースノートで「その他」に落ちる
+- `spotter (影運用)`: 上記 5 つの検査を汎用ツールへ切り出す作業
+  （[docs/hooks-extraction.md](hooks-extraction.md)）の一環。`spotter/`（insights とは
+  別の Go module）をビルドし、`.spotter.yml` の設定で同じ範囲に対して実行する。
+  `continue-on-error: true` なので失敗しても PR はブロックされない。旧来の
+  `scripts/check-*.sh` と結果が一致し続けることを見届けてから、`repo guards` /
+  `commit message` をこちらの呼び出しに置き換える
 
 これらの検査は insights の題材にほとんど依存しておらず、他のプロジェクトでもそのまま欲しくなります。
-別リポジトリの再利用可能なツール（フックの設置 + フックから呼ばれる CLI）へ切り出す案を
-[docs/hooks-extraction.md](hooks-extraction.md) に置いてあります（未着手の設計メモです）。
+別リポジトリの再利用可能なツール `spotter`（フックの設置 + フックから呼ばれる CLI）へ切り出す
+案を [docs/hooks-extraction.md](hooks-extraction.md) に置いてあります。`spotter/` として
+insights の中で作り切ってから、コミット履歴を持たずに新規リポジトリへコピーする方針です。
 
 #### 落ちたときにどう直すか
 
