@@ -12,7 +12,7 @@ env:
   # spotter（github.com/fuchigta/spotter）のリリースバイナリのバージョン。
   # 上げるときはこの値を書き換える（自動追従にしないのは、spotter 側のリリースで
   # 意図せず insights の CI が影響を受けないようにするため）。
-  SPOTTER_VERSION: v0.1.0
+  SPOTTER_VERSION: v0.2.0
 
 jobs:
   test:

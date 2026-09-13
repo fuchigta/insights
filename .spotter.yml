@@ -2,13 +2,11 @@
 #
 # .githooks/commit-msg と .github/workflows/ci.yml（repo guards / commit message
 # ジョブ）が spotter check --config .spotter.yml を通じてこのファイルを読む。
-# ドキュメントの対応表・拒否ルール・許可 type 一覧はここに集約されている
-# （旧 scripts/doc-sync.tsv・scripts/doc-paths-ignore.txt は削除済み。
-# docs/hooks-extraction.md §6 参照）。
+# ドキュメントの対応表・拒否ルール・許可 type 一覧はここに集約されている。
 
 # CI（.github/workflows/ci.yml の SPOTTER_VERSION）と合わせておく。上げるときは
 # 両方を書き換えること。
-required_version: v0.1.0
+required_version: v0.2.0
 
 checks:
   doc-sync:
@@ -48,11 +46,6 @@ checks:
       - paths: 'internal/skill/*/*.go'
         doc: docs/configuration.md
         when: '^[+-].*(skillsDirName|codexHomeDirName|"skills")'
-      - paths: 'scripts/check-*.sh'
-        doc: docs/development.md
-      - paths: 'scripts/check-*.sh'
-        doc: docs/hooks-extraction.md
-        when: '^[+-].*(PATTERN=|SKIP_PATTERN|TABLE=|IGNORE=|MAX_BYTES)'
       - paths: '.githooks/*'
         doc: docs/development.md
       - paths: '.github/dependabot.yml'
@@ -60,41 +53,33 @@ checks:
       - paths: '.github/workflows/*.yml'
         doc: docs/development.md
         when: '^[+-].*(name:|run:|if:)'
+    # テストは利用者に見える面を定義しないため対象から外す。
+    exclude:
+      - '**/*_test.go'
 
   unwanted-files:
     type: unwanted-files
-    # 現在の追跡ファイルの最大は 44KB 程度。scripts/check-unwanted-files.sh と同じ閾値。
     max_bytes: 1048576
     deny:
-      - paths: '*.db'
+      - paths: '**/*.db'
         reason: 利用者のデータベース
-      - paths: '*.db-wal'
+      - paths: '**/*.db-wal'
         reason: 利用者のデータベース
-      - paths: '*.db-shm'
+      - paths: '**/*.db-shm'
         reason: 利用者のデータベース
-      - paths: '*.jsonl'
+      - paths: '**/*.jsonl'
         reason: 取り込み元のセッションログ（他人との会話が入りうる）
-      - paths: '.insights/*'
-        reason: insights の実データ置き場
-      - paths: '*/.insights/*'
+      - paths: '**/.insights/**'
         reason: insights の実データ置き場
 
   doc-paths:
     type: doc-paths
-    # docs 省略時の既定（README.md / CLAUDE.md / docs/*.md / .github/*.md）で
-    # 旧 scripts/check-doc-paths.sh と同じ対象になる。
-    ignore:
-      - internal/source/codex
-      # docs/hooks-extraction.md は移行の経緯を記した設計メモで、削除済みの
-      # 旧シェルスクリプト・対応表を歴史的な参照として書いている（現存しない）。
-      - scripts/check-doc-sync.sh
-      - scripts/doc-sync.tsv
-      - scripts/check-unwanted-files.sh
-      - scripts/check-doc-paths.sh
-      - scripts/doc-paths-ignore.txt
-      - scripts/check-commit-subject.sh
-      - scripts/check-commit-types.sh
-      - scripts/check-*.sh
+    docs:
+      - README.md
+      - CLAUDE.md
+      - docs/*.md
+      - .github/*.md
+    path_prefixes: [internal, cmd, .githooks, .github]
 
   commit-subject:
     type: commit-subject
@@ -102,9 +87,8 @@ checks:
 
   commit-types:
     type: consistency
-    # 旧 scripts/check-commit-types.sh が突き合わせていた 3 箇所のうち、
-    # 許可 type 一覧は scripts/check-commit-subject.sh 削除後は
-    # checks.commit-subject.allowed_types（このファイル自身）に移っている。
+    # 許可 type 一覧の単一の情報源は checks.commit-subject.allowed_types
+    # （このファイル自身）なので、突き合わせ元としてもここを参照する。
     sources:
       - file: cliff.toml
         line: 'message = .\^[A-Za-z]+.'
