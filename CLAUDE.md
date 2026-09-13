@@ -147,6 +147,32 @@ CI で落ちたときの直し方は検査によって違う。`doc sync` は PR
   有効かつ root 空で `$CODEX_HOME`（無ければ `~/.codex`）に解決されるため、これを忘れると
   テストがその環境の実ログを読み、実行する人によって結果が変わる
 
+## spotter を切り出すまでの過渡期のルール
+
+フック群（`.githooks` / `scripts/check-*.sh`）を汎用ツール `spotter` として外部リポジトリへ切り出す
+計画がある（設計は [docs/hooks-extraction.md](docs/hooks-extraction.md)）。実装は**このリポジトリの
+中で作り切ってから、コミット履歴を持たずに新規リポジトリへコピーする**方針で進める。以下は
+切り出しが終わるまでの過渡期限定のルールで、**切り出しが完了したらこの節ごと削除する**。
+
+- **配置は `spotter/` 直下、独立した Go module にする。** 自分の `go.mod` を持たせ、
+  最終的な公開先の module path をそのまま使う。`internal/` 配下のパッケージは import path が
+  `github.com/fuchigta/insights/internal/...` の形になり、その親（`github.com/fuchigta/insights`）
+  の外からは Go の可視性ルールで参照できない。`spotter/` を別 module にしておけば、
+  「`internal/` に依存しない」という約束を人力のレビューではなくコンパイラに強制させられる
+- **`spotter/` から insights 側（`internal/` / `cmd/`）を参照しない。** 便利だからと参照すると、
+  切り出す瞬間まで依存に気付けない。外部コマンドへの依存も `git` 以外は増やさない
+- **CLI の出力（ヘルプ・エラーメッセージ）を日本語決め打ちにしない。** 上の「コードのスタイル」の
+  規約は insights 固有のものだが、`spotter` は他プロジェクトでも使う汎用ツールなので対象外にする。
+  コード中のコメントは日本語のままでよい（開発者向けであり、insights の他コードと同じ規約に従う）
+- **コミット規約・検査は insights と共通のまま。** `spotter/` の変更も Conventional Commits に従い、
+  scope は `spotter` を使う。ドキュメントを増やした場合は通常どおり `scripts/doc-sync.tsv` に
+  対応行を足す
+- **`spotter/` は別 module なので、ルートの `go test ./...` には含まれない。** コミット前には
+  `spotter` ディレクトリの中でも同じ 3 つ（`gofmt -l .` / `go vet ./...` / `go test ./...`）を
+  個別に実行すること
+- **切り出す際、コミット履歴は移行先に持っていかない。** `git subtree split` や `filter-repo` は
+  使わず、新規リポジトリを作って `spotter/` の中身をそのままコピーするだけでよい
+
 ## 改行コード
 
 `.gitattributes` で作業ツリーを LF に統一している。これを外すと、埋め込みアセットとのバイト比較
