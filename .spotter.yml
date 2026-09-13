@@ -1,0 +1,104 @@
+# insights 自身の検査設定。
+#
+# docs/hooks-extraction.md §6 の移行段取りに従い、いまは CI での影運用専用。
+# scripts/check-*.sh・.githooks/commit-msg を置き換えるのは、この設定に基づく
+# spotter check の結果が既存のシェルスクリプトと十分な期間一致してから
+# （そのタイミングで scripts/doc-sync.tsv・doc-paths-ignore.txt はこのファイルへ
+# 統合され、削除される）。
+
+checks:
+  doc-sync:
+    type: doc-sync
+    # scripts/doc-sync.tsv と同じ内容。対応を増やすときは両方に足すのではなく、
+    # 影運用が終わって切り替えた後にこちらだけを直す。
+    pairs:
+      - paths: 'internal/cli/*.go'
+        doc: README.md
+        when: '^[+-].*(Use:|Short:|Flags\(\)\.|AddCommand\()'
+      - paths: 'internal/judge/prompts/*'
+        doc: docs/reports.md
+      - paths: 'internal/rollup/prompts/*'
+        doc: docs/reports.md
+      - paths: 'internal/rollup/synth.go'
+        doc: docs/reports.md
+        when: '^[+-].*"description"'
+      - paths: 'internal/render/format.go'
+        doc: docs/reports.md
+        when: '^[+-].*yaml:"'
+      - paths: 'internal/config/config.go'
+        doc: docs/configuration.md
+      - paths: 'internal/pricing/*'
+        doc: docs/cost.md
+      - paths: 'internal/judge/claudecli/*.go'
+        doc: docs/cost.md
+        when: '^[+-].*defaultMaxBudgetUSD'
+      - paths: 'internal/judge/codexcli/*.go'
+        doc: docs/cost.md
+        when: '^[+-].*defaultTimeout'
+      - paths: 'internal/source/*/*.go'
+        doc: docs/development.md
+        when: '^[+-].*(Subdir|SUBDIR|rolloutPrefix|compressedSuffix|memoryDirName|subagentsDirName)'
+      - paths: 'internal/update/*.go'
+        doc: docs/configuration.md
+      - paths: 'internal/update/*.go'
+        doc: docs/privacy.md
+        when: '^[+-].*(NewRequestWithContext|User-Agent|userAgent)'
+      - paths: 'internal/skill/*/*.go'
+        doc: docs/configuration.md
+        when: '^[+-].*(skillsDirName|codexHomeDirName|"skills")'
+      - paths: 'scripts/check-*.sh'
+        doc: docs/development.md
+      - paths: 'scripts/check-*.sh'
+        doc: docs/hooks-extraction.md
+        when: '^[+-].*(PATTERN=|SKIP_PATTERN|TABLE=|IGNORE=|MAX_BYTES)'
+      - paths: '.githooks/*'
+        doc: docs/development.md
+      - paths: '.github/dependabot.yml'
+        doc: docs/development.md
+      - paths: '.github/workflows/*.yml'
+        doc: docs/development.md
+        when: '^[+-].*(name:|run:|if:)'
+
+  unwanted-files:
+    type: unwanted-files
+    # 現在の追跡ファイルの最大は 44KB 程度。scripts/check-unwanted-files.sh と同じ閾値。
+    max_bytes: 1048576
+    deny:
+      - paths: '*.db'
+        reason: 利用者のデータベース
+      - paths: '*.db-wal'
+        reason: 利用者のデータベース
+      - paths: '*.db-shm'
+        reason: 利用者のデータベース
+      - paths: '*.jsonl'
+        reason: 取り込み元のセッションログ（他人との会話が入りうる）
+      - paths: '.insights/*'
+        reason: insights の実データ置き場
+      - paths: '*/.insights/*'
+        reason: insights の実データ置き場
+
+  doc-paths:
+    type: doc-paths
+    # docs 省略時の既定（README.md / CLAUDE.md / docs/*.md / .github/*.md）で
+    # scripts/check-doc-paths.sh と同じ対象になる。
+    ignore:
+      - internal/source/codex
+
+  commit-subject:
+    type: commit-subject
+    allowed_types: [feat, fix, perf, refactor, docs, test, build, ci, chore, revert]
+
+  commit-types:
+    type: consistency
+    # scripts/check-commit-types.sh が突き合わせていた 3 箇所と同じ抽出規則。
+    sources:
+      - file: cliff.toml
+        line: 'message = .\^[A-Za-z]+.'
+        extract: '\^([A-Za-z]+)'
+      - file: scripts/check-commit-subject.sh
+        line: '^PATTERN='
+        extract: '\(([a-zA-Z|]+)\)'
+        split: '|'
+      - file: CLAUDE.md
+        line: '^\| `[a-zA-Z]+` \|'
+        extract: '`([a-zA-Z]+)`'
