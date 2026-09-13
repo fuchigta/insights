@@ -81,31 +81,20 @@ Codex 側のロールアウトの構造は公開仕様として文書化され�
     `.spotter.yml` の `checks.doc-paths.ignore` に列挙して除外する
   - `unwanted-files`: セッションログ・データベース・巨大ファイルの混入。
     逃げ道は `Unwanted-Files: skip <理由>`
-  - `commit-types`: Conventional Commits の type 一覧が `cliff.toml` / `scripts/check-commit-subject.sh`
-    （※現在は `.spotter.yml` の `checks.commit-subject.allowed_types`）/ `CLAUDE.md` の
-    3 箇所で一致しているか。1 箇所だけに足すと、通るのにリリースノートで「その他」に落ちる
-- `spotter test`: `spotter/`（insights とは別の Go module）を Ubuntu / Windows / macOS
-  の 3 OS で `go vet` → `go build ./...` → `go test ./...`。別 module のためルートの
-  `test` の対象に含まれず、ここで別途確認する
-- `spotter format & tidy`: `spotter/` の `gofmt -l .` と `go mod tidy` 差分チェック
+  - `commit-types`: Conventional Commits の type 一覧が `cliff.toml` / `.spotter.yml`
+    （`checks.commit-subject.allowed_types`）/ `CLAUDE.md` の 3 箇所で一致しているか。
+    1 箇所だけに足すと、通るのにリリースノートで「その他」に落ちる
 
-これらの検査は insights の題材にほとんど依存しておらず、他のプロジェクトでもそのまま欲しくなります。
-別リポジトリの再利用可能なツール `spotter`（フックの設置 + フックから呼ばれる CLI）へ切り出す
-設計を [docs/hooks-extraction.md](hooks-extraction.md) に置いてあります。`spotter/` として
-insights の中で作り切ってから、コミット履歴を持たずに新規リポジトリへコピーする方針で、
-検査の実装自体は既にこちらへ移行済みです（旧 `scripts/check-*.sh` は削除済み）。
-
-### spotter のリリース
-
-`.github/workflows/spotter-release.yml` が `spotter-v*` タグの push で動き、
-Linux / macOS / Windows 向けのバイナリをビルドして GitHub Release を作成します。
-insights 本体の `.github/workflows/release.yml`（`v*` タグ、ルートの `cliff.toml`）とは
-タグの名前空間・設定ファイル（`spotter/cliff.toml`、`--include-path 'spotter/**'` で
-spotter 配下の変更だけをリリースノートに含める）を分けています。切り出し後（issue #12）は
-タグの `spotter-` 接頭辞を外し、insights 本体と同じ形に揃えます。
-
-`.spotter.yml` の `required_version` に下限バージョンを書くと、それを満たさない
-`spotter` では検査を実行させずにエラーで終了します（`spotter/internal/version`）。
+これらの検査の実体は `spotter`（[github.com/fuchigta/spotter](https://github.com/fuchigta/spotter)）です。
+insights の題材にほとんど依存しない汎用ツールとして、いったん `spotter/` に insights の中で
+作り切ってから、コミット履歴を持たずに切り出しました（経緯は [docs/hooks-extraction.md](hooks-extraction.md)）。
+insights 側にはもうコードは無く、`repo guards` / `commit message` ジョブが CI 内で
+GitHub Release からバイナリを取得して呼び出すだけです。バージョンは
+`.github/workflows/ci.yml` の `SPOTTER_VERSION`（CI 用）と `.spotter.yml` の
+`required_version`（手元で古いバイナリを使っていないかの下限チェック。満たさない場合は
+`spotter` が検査を実行せずエラーで終了する）の 2 箇所で固定しており、上げるときは両方を
+書き換えます。自動追従にしていないのは、spotter 側のリリースで insights の CI が
+意図せず影響を受けないようにするためです。
 
 #### 落ちたときにどう直すか
 

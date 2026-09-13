@@ -6,6 +6,10 @@
 # （旧 scripts/doc-sync.tsv・scripts/doc-paths-ignore.txt は削除済み。
 # docs/hooks-extraction.md §6 参照）。
 
+# CI（.github/workflows/ci.yml の SPOTTER_VERSION）と合わせておく。上げるときは
+# 両方を書き換えること。
+required_version: v0.1.0
+
 checks:
   doc-sync:
     type: doc-sync

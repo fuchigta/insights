@@ -70,8 +70,9 @@ CI は Linux / macOS / Windows の 3 環境で上記を実行し、競合検出�
 コードとドキュメントの片方だけを直して、もう片方が古いまま残るのを機械で止めている。
 対応は `.spotter.yml` の `checks.doc-sync.pairs` に「コードのパス → 一緒に直すドキュメント」
 として書いてあり、`.githooks/commit-msg` がコミット時に、CI の `repo guards` ジョブが
-コミット単位で検査する（コード側だけが入っていれば拒否する）。検査の実体は `spotter`
-（`spotter/`、insights とは別の Go module。設計は [docs/hooks-extraction.md](docs/hooks-extraction.md)）。
+コミット単位で検査する（コード側だけが入っていれば拒否する）。検査の実体は外部ツール
+`spotter`（[github.com/fuchigta/spotter](https://github.com/fuchigta/spotter)。
+経緯は [docs/hooks-extraction.md](docs/hooks-extraction.md) 参照）。
 
 **ドキュメントを増やしたら、対応するコードの場所を `.spotter.yml` の `pairs` に 1 行足すこと。**
 表に載っていないドキュメントは検査されない＝誰にも気付かれずに陳腐化する。
@@ -148,32 +149,13 @@ CI で落ちたときの直し方は検査によって違う。`doc sync` は PR
   有効かつ root 空で `$CODEX_HOME`（無ければ `~/.codex`）に解決されるため、これを忘れると
   テストがその環境の実ログを読み、実行する人によって結果が変わる
 
-## spotter を切り出すまでの過渡期のルール
+## spotter
 
-フック群（`.githooks/commit-msg` から呼ぶ検査）を汎用ツール `spotter` として外部リポジトリへ
-切り出す計画がある（設計は [docs/hooks-extraction.md](docs/hooks-extraction.md)）。実装は
-**このリポジトリの中で作り切ってから、コミット履歴を持たずに新規リポジトリへコピーする**方針で
-進める（`.githooks/commit-msg` は既に `spotter check` を呼ぶよう切り替え済み）。以下は
-切り出しが終わるまでの過渡期限定のルールで、**切り出しが完了したらこの節ごと削除する**。
-
-- **配置は `spotter/` 直下、独立した Go module にする。** 自分の `go.mod` を持たせ、
-  最終的な公開先の module path をそのまま使う。`internal/` 配下のパッケージは import path が
-  `github.com/fuchigta/insights/internal/...` の形になり、その親（`github.com/fuchigta/insights`）
-  の外からは Go の可視性ルールで参照できない。`spotter/` を別 module にしておけば、
-  「`internal/` に依存しない」という約束を人力のレビューではなくコンパイラに強制させられる
-- **`spotter/` から insights 側（`internal/` / `cmd/`）を参照しない。** 便利だからと参照すると、
-  切り出す瞬間まで依存に気付けない。外部コマンドへの依存も `git` 以外は増やさない
-- **CLI の出力（ヘルプ・エラーメッセージ）を日本語決め打ちにしない。** 上の「コードのスタイル」の
-  規約は insights 固有のものだが、`spotter` は他プロジェクトでも使う汎用ツールなので対象外にする。
-  コード中のコメントは日本語のままでよい（開発者向けであり、insights の他コードと同じ規約に従う）
-- **コミット規約・検査は insights と共通のまま。** `spotter/` の変更も Conventional Commits に従い、
-  scope は `spotter` を使う。ドキュメントを増やした場合は通常どおり `.spotter.yml` の
-  `checks.doc-sync.pairs` に対応行を足す
-- **`spotter/` は別 module なので、ルートの `go test ./...` には含まれない。** コミット前には
-  `spotter` ディレクトリの中でも同じ 3 つ（`gofmt -l .` / `go vet ./...` / `go test ./...`）を
-  個別に実行すること
-- **切り出す際、コミット履歴は移行先に持っていかない。** `git subtree split` や `filter-repo` は
-  使わず、新規リポジトリを作って `spotter/` の中身をそのままコピーするだけでよい
+`.githooks/commit-msg` と CI の検査は、汎用ツール `spotter`（[github.com/fuchigta/spotter](https://github.com/fuchigta/spotter)）
+を呼んでいる。insights 側にはコードは無く、`.github/workflows/ci.yml` の `SPOTTER_VERSION` と
+`.spotter.yml` の `required_version` で参照するリリースバージョンを固定している
+（自動追従にしていない。spotter 側のリリースで insights の CI が意図せず影響を受けないため）。
+経緯は [docs/hooks-extraction.md](docs/hooks-extraction.md) を参照。
 
 ## 改行コード
 
