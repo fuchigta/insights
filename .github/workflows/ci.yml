@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # spotter（github.com/fuchigta/spotter）のリリースバイナリのバージョン。
+  # 上げるときはこの値を書き換える（自動追従にしないのは、spotter 側のリリースで
+  # 意図せず insights の CI が影響を受けないようにするため）。
+  SPOTTER_VERSION: v0.1.0
+
 jobs:
   test:
     name: test (${{ matrix.os }})
@@ -90,17 +96,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: spotter/go.mod
-          cache: true
-          cache-dependency-path: spotter/go.sum
-
-      - name: spotter のビルド
+      - name: spotter の取得
         run: |
           mkdir -p "$RUNNER_TEMP/spotter-bin"
-          cd spotter
-          go build -o "$RUNNER_TEMP/spotter-bin/spotter" ./cmd/spotter
+          cd "$RUNNER_TEMP/spotter-bin"
+          curl -fsSLO "https://github.com/fuchigta/spotter/releases/download/${SPOTTER_VERSION}/spotter-linux-amd64"
+          curl -fsSLO "https://github.com/fuchigta/spotter/releases/download/${SPOTTER_VERSION}/spotter-linux-amd64.sha256"
+          sha256sum -c spotter-linux-amd64.sha256
+          chmod +x spotter-linux-amd64
+          mv spotter-linux-amd64 spotter
           echo "$RUNNER_TEMP/spotter-bin" >> "$GITHUB_PATH"
 
       # ローカルの commit-msg フックはすり抜けうる（フックは clone に含まれず、
@@ -132,82 +136,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: spotter/go.mod
-          cache: true
-          cache-dependency-path: spotter/go.sum
-
-      - name: spotter のビルド
+      - name: spotter の取得
         run: |
           mkdir -p "$RUNNER_TEMP/spotter-bin"
-          cd spotter
-          go build -o "$RUNNER_TEMP/spotter-bin/spotter" ./cmd/spotter
+          cd "$RUNNER_TEMP/spotter-bin"
+          curl -fsSLO "https://github.com/fuchigta/spotter/releases/download/${SPOTTER_VERSION}/spotter-linux-amd64"
+          curl -fsSLO "https://github.com/fuchigta/spotter/releases/download/${SPOTTER_VERSION}/spotter-linux-amd64.sha256"
+          sha256sum -c spotter-linux-amd64.sha256
+          chmod +x spotter-linux-amd64
+          mv spotter-linux-amd64 spotter
           echo "$RUNNER_TEMP/spotter-bin" >> "$GITHUB_PATH"
 
       # ローカルの commit-msg フックはすり抜けうる（フックは clone に含まれず、
       # 有効化も手動のため）。CI を最後の歯止めにする。
       - name: Conventional Commits の検証
         run: spotter check --config .spotter.yml commit-subject --range "$(spotter range)"
-
-  # spotter/ は insights とは別の Go module なので、ルートの test/lint ジョブの
-  # 対象に含まれない（go list ./... で検出されない）。切り出し前に Windows/macOS
-  # でも動作確認できるよう、同じ形で 3 OS マトリクスにしておく。
-  spotter-test:
-    name: spotter test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: spotter/go.mod
-          cache: true
-          cache-dependency-path: spotter/go.sum
-
-      - name: go vet
-        working-directory: spotter
-        run: go vet ./...
-
-      - name: go build
-        working-directory: spotter
-        run: go build ./...
-
-      - name: go test
-        working-directory: spotter
-        run: go test ./...
-
-  spotter-lint:
-    name: spotter format & tidy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: spotter/go.mod
-          cache: true
-          cache-dependency-path: spotter/go.sum
-
-      - name: gofmt
-        working-directory: spotter
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "gofmt で整形されていないファイルがあります:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - name: go mod tidy
-        working-directory: spotter
-        run: |
-          go mod tidy
-          if ! git diff --exit-code go.mod go.sum; then
-            echo "go mod tidy による差分があります。ローカルで go mod tidy を実行してコミットしてください。"
-            exit 1
-          fi

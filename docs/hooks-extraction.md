@@ -2,12 +2,16 @@
 
 # フック群を外部ツールへ切り出す設計メモ
 
-このリポジトリの `.githooks/commit-msg` と `scripts/check-*.sh` は、insights の題材（セッションログ）に
-依存している部分がごく一部しかありません。**他のプロジェクトでもそのまま欲しくなる検査**なので、
-別リポジトリの再利用可能なツール（フックの設置 + フックから呼ばれる CLI）として切り出す案を
-ここに残します。
+このリポジトリにあった `.githooks/commit-msg` と `scripts/check-*.sh` は、insights の題材
+（セッションログ）に依存している部分がごく一部しかありませんでした。**他のプロジェクトでも
+そのまま欲しくなる検査**だったため、別リポジトリの再利用可能なツール（フックの設置 + フックから
+呼ばれる CLI）として切り出しました。
 
-これは**決定ではなく判断材料**です。実装はまだ始めていません。
+**切り出しは完了しています。** 実装は [github.com/fuchigta/spotter](https://github.com/fuchigta/spotter)
+にあります。insights 側は `spotter` を外部ツールとして利用するだけで、コードはもう
+このリポジトリにはありません（`.githooks/commit-msg`・`.github/workflows/ci.yml` の
+`repo guards`/`commit message` ジョブ・`.spotter.yml` を参照）。以下は判断材料として
+検討した経緯・設計の記録です（過去形で書き直してはいませんが、実装済みという前提で読んでください）。
 
 ## 1. 何が汎用で、何が insights 固有か
 
@@ -352,14 +356,14 @@ before..after、③ 判定できない・新規ブランチ等 → フォール�
 
 加えて、設定に `required_version` を持たせ、**古いバイナリでは失敗させる**ようにしました。
 検査が増えたのに手元のバイナリが古いと、「手元で通ったものは CI でも通る」という前提が崩れるためです
-（`spotter/internal/version`。バージョン文字列を解釈できない場合、つまり `go install`/`go run` で
-ビルドしたことを示す既定値 `dev` のときは判定不能として満たしているとみなし、ブロックしません）。
+（spotter リポジトリの `internal/version`。バージョン文字列を解釈できない場合、つまり
+`go install`/`go run` でビルドしたことを示す既定値 `dev` のときは判定不能として満たしている
+とみなし、ブロックしません）。
 
-バイナリのビルド・配布は `.github/workflows/spotter-release.yml`（`spotter-v*` タグ、
-`spotter/cliff.toml`）として insights のリポジトリ内に実装済みです（詳細は
-[docs/development.md](development.md) の「spotter のリリース」）。insights 本体の
-リリースワークフローと同じリポジトリに同居する間はタグの名前空間を分けており、
-切り出し後（#12）に接頭辞を外す予定です。
+バイナリのビルド・配布は、切り出し後は spotter リポジトリ自身の `.github/workflows/release.yml`・
+`cliff.toml`（`v*` タグ）で行います。insights はビルドせず、CI・commit-msg フックの両方が
+GitHub Release からバイナリを取得して使うだけです（詳細は [docs/development.md](development.md) の
+「CI」節、バージョン固定の方法を含む）。
 
 ## 6. 移行の段取り（insights 側）
 
@@ -401,16 +405,29 @@ before..after、③ 判定できない・新規ブランチ等 → フォール�
    置き換わったら切り出す。新規リポジトリを作り、`spotter/` の中身をそのままコピーして
    module path を最終的なものに付け替えるだけでよい（コミット履歴は持っていかない）
 
-   → 上記が完了したので着手可能。受け皿のリポジトリ（`github.com/fuchigta/spotter`、
-   module path と一致）は作成済み（中身のコピーはこれから）
+   → 完了。[github.com/fuchigta/spotter](https://github.com/fuchigta/spotter) へコミット履歴
+   無しでコピーし、`v0.1.0` を最初のリリースとして公開した（module path は
+   `github.com/fuchigta/spotter` のまま付け替え不要）。CI/リリースワークフローも
+   insights のものを流用し、タグは `spotter-v*` → `v*` に、`cliff.toml` の
+   `tag_pattern`・コミットリンク先も新リポジトリ用に戻した。LICENSE（MIT）を新規に追加した
+   （insights 自体にも合わせて追加した）
 7. 切り出し後、insights 側の `spotter/` ディレクトリと `CLAUDE.md` の過渡期ルール節を削除し、
    `spotter` を外部ツールとして `spotter install` で導入し直す
+
+   → 完了。`spotter/` ディレクトリ・`.github/workflows/spotter-release.yml`・CI の
+   `spotter test`/`spotter format & tidy` ジョブを削除した。`.githooks/commit-msg` と
+   `.github/workflows/ci.yml` の `repo guards`/`commit message` ジョブは、ローカルの
+   `spotter/` をビルドする方式から、新リポジトリの GitHub Release からバイナリを取得する
+   方式に変更した（`.sha256` でチェックサム検証、`.github/workflows/ci.yml` の
+   `SPOTTER_VERSION` と `.spotter.yml` の `required_version` でバージョンを固定。
+   自動追従にしていないのは、spotter 側のリリースで insights の CI が意図せず
+   影響を受けないようにするため）。`CLAUDE.md` の過渡期ルール節は削除し、代わりに
+   外部ツールとしての参照先だけを残した
 
 ## 7. 決めていないこと
 
 - `doc-sync` の `pairs` のような行指向で見たい対応表を YAML の中でどこまで読みやすく保てるか
   （TSV は diff が読みやすいという利点があったが、YAML への統一自体はここまでの検討で
-  自然に前提になっている）。これは事前に仕様を詰めるより、実装しながら実際の対応表を
-  書いてみて判断する
+  自然に前提になっている）。運用してみて問題が出なかったため決着した（旧 issue #16）
 
 [← README に戻る](../README.md)
