@@ -16,6 +16,10 @@ type Invocation struct {
 	Message string
 	// Label は失敗時の表示に使う「（<短い sha> <件名> までの範囲）」のようなラベル。
 	Label string
+	// From, To はこの起動が見る比較両端の生の git 参照。command 型検査が
+	// 外部プロセスに --from/--to を渡すために使う（Source だけでは生の参照が
+	// 取り出せないため）。
+	From, To string
 }
 
 // Plan は rangeExpr（"a..b" や "-1 HEAD" のような git の範囲式）を granularity に応じた
@@ -51,6 +55,8 @@ func Plan(repo *gitutil.Repo, rangeExpr string, granularity check.Granularity) (
 			Source:  repo.RangeSource(from, newest),
 			Message: message,
 			Label:   fmt.Sprintf("（%s までの範囲）", label),
+			From:    from,
+			To:      newest,
 		}}, nil
 
 	case check.GranularityPerCommit:
@@ -72,6 +78,8 @@ func Plan(repo *gitutil.Repo, rangeExpr string, granularity check.Granularity) (
 				Source:  repo.RangeSource(from, sha),
 				Message: message,
 				Label:   fmt.Sprintf("（%s）", label),
+				From:    from,
+				To:      sha,
 			})
 		}
 		return invocations, nil
