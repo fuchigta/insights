@@ -10,6 +10,7 @@ import (
 	"github.com/fuchigta/spotter/internal/config"
 	"github.com/fuchigta/spotter/internal/gitutil"
 	"github.com/fuchigta/spotter/internal/hooks"
+	"github.com/fuchigta/spotter/internal/version"
 )
 
 func newDoctorCommand() *cobra.Command {
@@ -30,12 +31,27 @@ func newDoctorCommand() *cobra.Command {
 }
 
 func runDoctor(stdout io.Writer, configPath string) error {
+	fmt.Fprintf(stdout, "spotter: %s\n", buildVersion)
 	fmt.Fprintf(stdout, "設定: %s\n", configPath)
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		fmt.Fprintf(stdout, "  読み込みに失敗しました: %v\n", err)
 		return fmt.Errorf("doctor: %w", err)
+	}
+
+	versionFailed := false
+	if cfg.RequiredVersion != "" {
+		ok, err := version.Satisfies(buildVersion, cfg.RequiredVersion)
+		if err != nil {
+			fmt.Fprintf(stdout, "  required_version: エラー（%v）\n", err)
+			versionFailed = true
+		} else if !ok {
+			fmt.Fprintf(stdout, "  required_version %s を満たしていません（バイナリの更新が必要です）\n", cfg.RequiredVersion)
+			versionFailed = true
+		} else {
+			fmt.Fprintf(stdout, "  required_version %s を満たしています\n", cfg.RequiredVersion)
+		}
 	}
 
 	keys := make([]string, 0, len(cfg.Checks))
@@ -83,7 +99,7 @@ func runDoctor(stdout io.Writer, configPath string) error {
 		fmt.Fprintf(stdout, "  %s: あり（spotter は未設定。`spotter install` で追記できます）\n", status.HookFile)
 	}
 
-	if buildFailed {
+	if buildFailed || versionFailed {
 		return ErrCheckFailed
 	}
 	return nil

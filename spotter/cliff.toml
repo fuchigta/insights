@@ -1,0 +1,54 @@
+# git-cliff の設定（spotter 専用）。
+#
+# spotter はいまのところ insights と同じリポジトリに同居しているが（切り出しは
+# docs/hooks-extraction.md §6・issue #12）、insights 本体のリリース（ルートの
+# cliff.toml、v[0-9]* タグ）と衝突しないよう、タグ接頭辞・コミット範囲を分けている。
+#
+# ローカル検証（リポジトリのルートから）:
+#   git-cliff --config spotter/cliff.toml --latest --strip header --include-path 'spotter/**'
+
+[changelog]
+header = ""
+body = """
+{% if version %}\
+## {{ version | trim_start_matches(pat="spotter-v") }} ({{ timestamp | date(format="%Y-%m-%d") }})
+{% else %}\
+## 未リリース
+{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}\
+### {{ group | striptags | trim }}
+{% for commit in commits %}\
+- {% if commit.breaking %}**破壊的変更** {% endif %}\
+{{ commit.message | split(pat="\n") | first | trim }}\
+{% if commit.id %} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/fuchigta/insights/commit/{{ commit.id }})){% endif %}
+{% endfor %}
+{% endfor %}"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+filter_commits = false
+protect_breaking_commits = true
+split_commits = false
+topo_order = false
+sort_commits = "oldest"
+# insights 本体（v[0-9]*）と衝突しないよう spotter- 接頭辞にしている。
+# 切り出し後（#12）は接頭辞を外して v[0-9]* に揃える。
+tag_pattern = "spotter-v[0-9]*"
+
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->新機能" },
+  { message = "^fix", group = "<!-- 1 -->不具合修正" },
+  { message = "^perf", group = "<!-- 2 -->性能改善" },
+  { message = "^refactor", group = "<!-- 3 -->リファクタリング" },
+  { message = "^docs", group = "<!-- 4 -->ドキュメント" },
+  { message = "^test", group = "<!-- 5 -->テスト" },
+  { message = "^build", group = "<!-- 6 -->ビルド・依存関係" },
+  { message = '^chore\(release\)', skip = true },
+  { message = "^ci", group = "<!-- 7 -->CI" },
+  { message = "^chore", group = "<!-- 8 -->雑務" },
+  { message = "^revert", group = "<!-- 9 -->取り消し" },
+  { message = ".*", group = "<!-- 10 -->その他" },
+]
