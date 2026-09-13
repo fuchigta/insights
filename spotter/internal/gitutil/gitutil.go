@@ -62,6 +62,32 @@ func (r *Repo) RevListNoMerges(rangeExpr string) ([]string, error) {
 	return splitNonEmptyLines(out), nil
 }
 
+// ConfigGet は git config の値を読む。未設定なら ok=false（値の有無と空文字の区別が
+// 要らない呼び出し側の便宜のため、エラーではなく ok で表す）。
+func (r *Repo) ConfigGet(key string) (value string, ok bool, err error) {
+	out, runErr := r.run("config", "--get", key)
+	if runErr != nil {
+		return "", false, nil
+	}
+	return strings.TrimSpace(out), true, nil
+}
+
+// ConfigSet は git config の値を設定する。
+func (r *Repo) ConfigSet(key, value string) error {
+	_, err := r.run("config", key, value)
+	return err
+}
+
+// GitPath は git rev-parse --git-path で、.git ディレクトリ配下の実際のパスを解決する
+// （worktree・submodule で .git が単純なディレクトリではない場合も正しく解決するため）。
+func (r *Repo) GitPath(rel string) (string, error) {
+	out, err := r.run("rev-parse", "--git-path", rel)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // CommitExists は sha がこのリポジトリに実在するコミットかどうかを返す。
 // 新しいブランチの最初の push や force push 直後は CI が渡す「比較元」の SHA が
 // 全ゼロ（0000...）になったり、そもそも取得されていなかったりする。そうした
