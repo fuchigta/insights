@@ -130,6 +130,24 @@ CI での見方は検査によって違います。**この違いは意図的で
 実行時に `$CODEX_HOME`（無ければ `~/.codex`）へ解決されるため、放置するとテストを走らせた人の
 実際の Codex ログを読み込んでしまい、結果が実行環境によって変わります。
 
+## 価格表の同期（prices-sync）
+
+`.github/workflows/prices-sync.yml` が週 1 回（月曜 00:00 UTC。`workflow_dispatch` で手動実行も可）、
+LiteLLM の価格表を取得して `internal/pricing/prices.json` を作り直します。手作業の価格表は更新が遅れ、
+値上げの撤回や新モデルの追加を取りこぼしたためです。流れは次のとおりです。
+
+- `cmd/pricesync` が LiteLLM の JSON（`-litellm`）と `internal/pricing/prices_manual.json`（`-manual`）から
+  `prices.json` を生成します。変換ロジックは `internal/pricing/litellm` にあります
+- `go test ./internal/pricing/...` を通したうえで、差分があれば固定名のブランチ `chore/prices-sync` に
+  force push し、`gh pr create` で PR を作ります（既に PR があれば本文を更新するだけ）。差分が無ければ何もしません
+- 人が PR の差分（特に既存モデルの単価の変化）をレビューしてから取り込みます
+- LiteLLM にも `prices_manual.json` にも無い既存モデルは、消さずに残して標準エラーに警告を出します
+
+**`GITHUB_TOKEN` で作った PR では CI が自動起動しません**（GitHub の仕様で、ワークフローが作った
+イベントは別のワークフローを起動しないため）。PR を一度閉じて開き直すか、`chore/prices-sync` に
+空コミットを push すると `test` などが走ります。`repo guards` の `doc-sync` は、同期コミットの本文に
+`Doc-Sync: skip` のトレーラを入れて外しています（値の更新だけで、同期処理の挙動は変えていないため）。
+
 ## GitHub 側で有効にしているもの
 
 公開リポジトリなので、有料の Advanced Security 相当がいくつか無料で使えます。ワークフローを
