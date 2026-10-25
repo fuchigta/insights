@@ -36,6 +36,8 @@ type dailyOptions struct {
 	// Yes は評価前の課金確認を省略する。daily は --no-judge が無ければ
 	// 内部で AI 評価を走らせるため、judge と同じ確認を通す必要がある。
 	Yes bool
+	// IncludeActive は作業中のセッションも評価する（judge と同じ）。
+	IncludeActive bool
 }
 
 // newDailyCommand は `insights daily` を組み立てる。
@@ -60,6 +62,7 @@ func newDailyCommand() *cobra.Command {
 	cmd.Flags().StringVar(&opts.Date, "date", "", "対象日 (YYYY-MM-DD)。省略時は今日")
 	cmd.Flags().BoolVar(&opts.NoJudge, "no-judge", false, "未評価セッションの事前 AI 評価をスキップする")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "評価前の課金確認を省略する（非対話環境では必須）")
+	cmd.Flags().BoolVar(&opts.IncludeActive, "include-active", false, "作業中（最後の記録から judge.active_grace 以内）のセッションも評価する")
 
 	return cmd
 }
@@ -72,6 +75,7 @@ type dailyResult struct {
 	ConfigExcluded  int      `json:"config_excluded"` // exclude.projects / exclude.entrypoints で除外した件数
 	JudgeEvaluated  int      `json:"judge_evaluated"`
 	JudgeFailed     int      `json:"judge_failed"`
+	ActiveSkipped   int      `json:"active_skipped"` // 作業中のため評価を見送った件数
 	JudgeCostUSD    float64  `json:"judge_cost_usd"`
 	JudgeSessionIDs []string `json:"judge_session_ids,omitempty"`
 	TotalSessions   int      `json:"total_sessions"`
@@ -149,7 +153,7 @@ func dailyRun(cmd *cobra.Command, cfg *config.Config, opts dailyOptions) (*daily
 		return nil, err
 	}
 
-	return runDaily(ctx, cmd, cfg, db, prices, j, rows, configExcluded, date, opts.NoJudge, opts.Yes)
+	return runDaily(ctx, cmd, cfg, db, prices, j, rows, configExcluded, date, opts.NoJudge, opts.Yes, opts.IncludeActive)
 }
 
 // runDaily は daily の本体処理。judge.Judge をパラメータで受け取るため、
@@ -166,6 +170,7 @@ func runDaily(
 	date string,
 	noJudge bool,
 	yes bool,
+	includeActive bool,
 ) (*dailyResult, error) {
 	start := time.Now()
 	stderr := cmd.ErrOrStderr()
@@ -188,13 +193,14 @@ func runDaily(
 	// (b) を確認の対象から外すと「--no-judge なら課金しない」と誤解されるため、
 	// 両方をまとめてここで 1 回だけ確認する。
 	pendingEvals := 0
+	active := newActiveWindow(cfg, includeActive)
 	// 見積もりは DB に残っている評価の実績から出す（internal/cli/estimate.go）。
 	estimatePrices := loadEstimatePrices(cfg)
 	estimator := newEvalCostEstimator(db, estimatePrices, cfg.Judge.Model, cfg.Judge.Backend)
 	evalEstimate := 0.0
 	evalFromActual := 0
 	if !noJudge {
-		pre, prepErr := prepareEvalTargets(db, rows, usageRows, false, prompts.PromptVersion)
+		pre, prepErr := prepareEvalTargets(db, rows, usageRows, false, prompts.PromptVersion, active)
 		if prepErr != nil {
 			return nil, prepErr
 		}
@@ -216,10 +222,13 @@ func runDaily(
 	if noJudge {
 		result.SkippedJudge = true
 	} else {
-		plan, prepErr := prepareEvalTargets(db, rows, usageRows, false, prompts.PromptVersion)
+		plan, prepErr := prepareEvalTargets(db, rows, usageRows, false, prompts.PromptVersion, active)
 		if prepErr != nil {
 			return nil, prepErr
 		}
+
+		result.ActiveSkipped = plan.ActiveSkipped
+		reportActiveSkipped(stderr, "insights daily", plan.ActiveSkipped, cfg)
 
 		if len(plan.Targets) > 0 {
 			fmt.Fprintf(stderr, "insights daily: 未評価セッション %d 件を評価します\n", len(plan.Targets))
@@ -262,7 +271,7 @@ func runDaily(
 		}
 	}
 
-	sessionsData, err := buildSessionData(db, rows, usageRows)
+	sessionsData, err := buildSessionData(db, rows, usageRows, active)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +362,7 @@ func runDaily(
 
 // buildSessionData は SessionsInRange/UsageInRange の結果と評価キャッシュ・成果物件数から
 // rollup.BuildDaily への入力（rollup.SessionData の列）を組み立てる。
-func buildSessionData(db *store.DB, rows []store.SessionRow, usageRows []store.UsageRow) ([]rollup.SessionData, error) {
+func buildSessionData(db *store.DB, rows []store.SessionRow, usageRows []store.UsageRow, active activeWindow) ([]rollup.SessionData, error) {
 	usageBySession := map[string][]store.UsageRow{}
 	for _, u := range usageRows {
 		usageBySession[u.SessionID] = append(usageBySession[u.SessionID], u)
@@ -385,6 +394,7 @@ func buildSessionData(db *store.DB, rows []store.SessionRow, usageRows []store.U
 			Eval:             ev,
 			Evidence:         len(evidenceItems),
 			PullRequestCount: countPullRequests(evidenceItems),
+			Active:           active.isActive(r),
 		})
 	}
 	return out, nil
@@ -455,6 +465,9 @@ func renderDailyHuman(w io.Writer, r *dailyResult) error {
 	} else {
 		fmt.Fprintf(w, "評価: 成功 %d 件, 失敗 %d 件\n", r.JudgeEvaluated, r.JudgeFailed)
 		fmt.Fprintf(w, "評価コスト（今回発生分）: $%.4f\n", r.JudgeCostUSD)
+		if r.ActiveSkipped > 0 {
+			fmt.Fprintf(w, "作業中のため評価を見送り: %d 件（日報・振り返りでは評価保留として扱います）\n", r.ActiveSkipped)
+		}
 	}
 	fmt.Fprintln(w)
 

@@ -41,7 +41,7 @@ func TestPrepareEvalTargets_AllSidechainsAreEvaluated(t *testing.T) {
 		t.Fatalf("UsageInRange() error = %v", err)
 	}
 
-	plan, err := prepareEvalTargets(db, rows, usage, false, prompts.PromptVersion)
+	plan, err := prepareEvalTargets(db, rows, usage, false, prompts.PromptVersion, activeWindow{})
 	if err != nil {
 		t.Fatalf("prepareEvalTargets() error = %v", err)
 	}
@@ -86,7 +86,7 @@ func TestEvaluateSessionsInPhases_ChildEvalReachesParentPrompt(t *testing.T) {
 		t.Fatalf("UsageInRange() error = %v", err)
 	}
 
-	plan, err := prepareEvalTargets(db, rows, usage, false, "v1")
+	plan, err := prepareEvalTargets(db, rows, usage, false, "v1", activeWindow{})
 	if err != nil {
 		t.Fatalf("prepareEvalTargets() error = %v", err)
 	}

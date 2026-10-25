@@ -95,6 +95,9 @@ type judgeOptions struct {
 	Force bool
 	Yes   bool
 	Limit int
+	// IncludeActive は作業中のセッションも評価する。既定では最後の記録から
+	// judge.active_grace 以内のセッションは途中の状態なので見送る。
+	IncludeActive bool
 }
 
 // newJudgeCommand は `insights judge` を組み立てる。
@@ -134,6 +137,7 @@ func newJudgeCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.Force, "force", false, "キャッシュ済みの評価も再実行する")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "確認なしで実行する（非対話環境では必須）")
 	cmd.Flags().IntVar(&opts.Limit, "limit", 0, "評価する件数の上限（0 は無制限）")
+	cmd.Flags().BoolVar(&opts.IncludeActive, "include-active", false, "作業中（最後の記録から judge.active_grace 以内）のセッションも評価する")
 
 	return cmd
 }
@@ -200,7 +204,8 @@ type judgeResult struct {
 	TotalSessions       int           `json:"total_sessions"`
 	ConfigExcluded      int           `json:"config_excluded"` // exclude.projects / exclude.entrypoints で除外した件数
 	CacheSkipped        int           `json:"cache_skipped"`
-	Targeted            int           `json:"targeted"` // --limit 適用後、実際に評価しようとした件数
+	ActiveSkipped       int           `json:"active_skipped"` // 作業中のため評価を見送った件数
+	Targeted            int           `json:"targeted"`       // --limit 適用後、実際に評価しようとした件数
 	Evaluated           int           `json:"evaluated"`
 	Failed              int           `json:"failed"`
 	FailureDetails      []evalFailure `json:"failure_details,omitempty"`
@@ -262,11 +267,12 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 		return nil, fmt.Errorf("usage の取得に失敗しました: %w", err)
 	}
 
-	plan, err := prepareEvalTargets(db, rows, usageRows, opts.Force, prompts.PromptVersion)
+	plan, err := prepareEvalTargets(db, rows, usageRows, opts.Force, prompts.PromptVersion, newActiveWindow(cfg, opts.IncludeActive))
 	if err != nil {
 		return nil, err
 	}
 	result.CacheSkipped = plan.CacheSkipped
+	result.ActiveSkipped = plan.ActiveSkipped
 
 	targets := plan.Targets
 	if opts.Limit > 0 && len(targets) > opts.Limit {
@@ -277,6 +283,7 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 	stderr := cmd.ErrOrStderr()
 	fmt.Fprintf(stderr, "insights judge: 評価対象 %d 件（キャッシュ済み除外 %d 件）\n",
 		len(targets), plan.CacheSkipped)
+	reportActiveSkipped(stderr, "insights judge", plan.ActiveSkipped, cfg)
 
 	if len(targets) == 0 {
 		result.DurationSeconds = time.Since(start).Seconds()
@@ -555,6 +562,18 @@ type evalPlan struct {
 	ChildrenByParent map[string][]judge.ChildSummary
 	// Costs はセッション ID ごとのコスト集計。
 	Costs map[string]*sessionCostAgg
+	// ActiveSkipped は作業中のため評価を見送った件数。評価対象にも推定コストにも入れない。
+	ActiveSkipped int
+}
+
+// reportActiveSkipped は作業中のため評価を見送った件数を stderr に出す。
+// 黙って減らすと「なぜこのセッションだけ評価されないのか」が分からなくなるため。
+func reportActiveSkipped(w io.Writer, prefix string, n int, cfg *config.Config) {
+	if w == nil || n <= 0 {
+		return
+	}
+	fmt.Fprintf(w, "%s: 作業中のため評価を見送ったセッション %d 件（最後の記録から %s 以内。評価するには --include-active を指定）\n",
+		prefix, n, cfg.Judge.ActiveGrace.Duration)
 }
 
 // prepareEvalTargets は SessionsInRange/UsageInRange の結果から、評価すべきセッション一覧
@@ -568,6 +587,7 @@ func prepareEvalTargets(
 	usageRows []store.UsageRow,
 	force bool,
 	promptVersion string,
+	active activeWindow,
 ) (*evalPlan, error) {
 	costs := aggregateSessionCosts(usageRows)
 	childrenByParent, err := buildChildSummaries(db, rows, costs, promptVersion)
@@ -586,6 +606,12 @@ func prepareEvalTargets(
 				plan.CacheSkipped++
 				continue
 			}
+		}
+		// 評価済みのキャッシュを先に見るのは、すでに評価が残っているものまで
+		// 「見送り」と数えて件数を水増ししないため。
+		if active.isActive(r) {
+			plan.ActiveSkipped++
+			continue
 		}
 		plan.Targets = append(plan.Targets, r)
 	}
@@ -1035,6 +1061,9 @@ func renderJudgeHuman(w io.Writer, r *judgeResult) error {
 	fmt.Fprintf(w, "対象セッション（期間内合計）: %d 件\n", r.TotalSessions)
 	fmt.Fprintf(w, "除外（設定 exclude）: %d 件\n", r.ConfigExcluded)
 	fmt.Fprintf(w, "除外（評価キャッシュ済み）: %d 件\n", r.CacheSkipped)
+	if r.ActiveSkipped > 0 {
+		fmt.Fprintf(w, "除外（作業中のため評価を見送り）: %d 件\n", r.ActiveSkipped)
+	}
 	fmt.Fprintf(w, "評価対象: %d 件\n", r.Targeted)
 	fmt.Fprintln(w)
 

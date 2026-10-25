@@ -100,7 +100,7 @@ func TestDaily_SameDayRerunDoesNotVerifyTodaysProposals(t *testing.T) {
 	cmd := newDailyTestCmd(t)
 
 	for i := 1; i <= 2; i++ {
-		if _, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, 0, date, false, true); err != nil {
+		if _, err := runDaily(context.Background(), cmd, cfg, db, prices, fj, rows, 0, date, false, true, false); err != nil {
 			t.Fatalf("runDaily() %d回目 error = %v", i, err)
 		}
 	}

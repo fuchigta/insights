@@ -15,6 +15,8 @@ import (
 type runOptions struct {
 	Date string // YYYY-MM-DD。空なら今日
 	Yes  bool
+	// IncludeActive は作業中のセッションも評価する（judge / daily と同じ）。
+	IncludeActive bool
 }
 
 // newRunCommand は `insights run` を組み立てる。ingest -> judge -> daily を順に実行する
@@ -45,6 +47,7 @@ func newRunCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&opts.Date, "date", "", "対象日 (YYYY-MM-DD)。省略時は今日")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "評価コストの確認なしで実行する（非対話環境では必須）")
+	cmd.Flags().BoolVar(&opts.IncludeActive, "include-active", false, "作業中（最後の記録から judge.active_grace 以内）のセッションも評価する")
 
 	return cmd
 }
@@ -110,7 +113,7 @@ func runAll(cmd *cobra.Command, cfg *config.Config, opts runOptions) error {
 
 	// --- 2. judge（--yes の扱いは insights judge と同じ） ---
 	fmt.Fprintln(stderr, "insights run: judge を実行します")
-	judgeRes, judgeErr := judgeRun(cmd, cfg, judgeOptions{Date: date, Yes: opts.Yes})
+	judgeRes, judgeErr := judgeRun(cmd, cfg, judgeOptions{Date: date, Yes: opts.Yes, IncludeActive: opts.IncludeActive})
 	result.Judge = judgeRes
 	result.Stages = append(result.Stages, stageFrom("judge", judgeErr))
 	if judgeErr != nil {
@@ -125,7 +128,7 @@ func runAll(cmd *cobra.Command, cfg *config.Config, opts runOptions) error {
 	// 同じ条件で評価し直し、レート制限のように継続する失敗のときは同じ評価が 2 回走る。
 	// daily 側の課金確認は日報・振り返りの生成 2 回ぶんだけになり、judge 段階の確認とは
 	// 対象が重ならない。
-	dailyRes, dailyErr := dailyRun(cmd, cfg, dailyOptions{Date: date, Yes: opts.Yes, NoJudge: true})
+	dailyRes, dailyErr := dailyRun(cmd, cfg, dailyOptions{Date: date, Yes: opts.Yes, NoJudge: true, IncludeActive: opts.IncludeActive})
 	result.Daily = dailyRes
 	result.Stages = append(result.Stages, stageFrom("daily", dailyErr))
 	if dailyErr != nil {
