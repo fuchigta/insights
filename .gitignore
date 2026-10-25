@@ -22,9 +22,10 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Claude Code のセッション状態（プラン等）。共有する必要のある設定を
-# 置く場合はこのルールを外すこと。
-/.claude/
+# Claude Code のセッション状態（プラン・ワークツリー等）。共有するスキルだけは
+# Codex 用の .agents/skills/ と揃えてリポジトリに入れる。
+/.claude/*
+!/.claude/skills/
 
 # トップレベルの Markdown は既定で除外し、リポジトリに入れるものだけを
 # 明示的に許可する（作業メモや下書きを取り違えて公開しないため）。
