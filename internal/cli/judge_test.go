@@ -94,7 +94,7 @@ func TestPrepareEvalTargets_IncludesSidechainAndBuildsChildSummary(t *testing.T)
 		t.Fatalf("UsageInRange() error = %v", err)
 	}
 
-	plan, err := prepareEvalTargets(db, rows, usageRows, false, "v1")
+	plan, err := prepareEvalTargets(db, rows, usageRows, false, "v1", activeWindow{})
 	if err != nil {
 		t.Fatalf("prepareEvalTargets() error = %v", err)
 	}
@@ -153,7 +153,7 @@ func TestPrepareEvalTargets_CacheSkipAndForce(t *testing.T) {
 		t.Fatalf("UsageInRange() error = %v", err)
 	}
 
-	plan, err := prepareEvalTargets(db, rows, usageRows, false, "v1")
+	plan, err := prepareEvalTargets(db, rows, usageRows, false, "v1", activeWindow{})
 	if err != nil {
 		t.Fatalf("prepareEvalTargets() 1回目 error = %v", err)
 	}
@@ -165,7 +165,7 @@ func TestPrepareEvalTargets_CacheSkipAndForce(t *testing.T) {
 		t.Fatalf("SaveEval() error = %v", err)
 	}
 
-	plan2, err := prepareEvalTargets(db, rows, usageRows, false, "v1")
+	plan2, err := prepareEvalTargets(db, rows, usageRows, false, "v1", activeWindow{})
 	if err != nil {
 		t.Fatalf("prepareEvalTargets() 2回目 error = %v", err)
 	}
@@ -173,7 +173,7 @@ func TestPrepareEvalTargets_CacheSkipAndForce(t *testing.T) {
 		t.Fatalf("2回目（force=false）: targets=%d cacheSkipped=%d, want 0, 1（キャッシュが効くはず）", len(plan2.Targets), plan2.CacheSkipped)
 	}
 
-	plan3, err := prepareEvalTargets(db, rows, usageRows, true, "v1")
+	plan3, err := prepareEvalTargets(db, rows, usageRows, true, "v1", activeWindow{})
 	if err != nil {
 		t.Fatalf("prepareEvalTargets() --force error = %v", err)
 	}
