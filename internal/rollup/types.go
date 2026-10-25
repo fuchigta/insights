@@ -137,6 +137,9 @@ type SessionCard struct {
 	// 含む全成果物件数）とは別の指標として持つ。
 	PullRequestCount int         `json:"pull_request_count"`
 	Eval             *model.Eval `json:"eval,omitempty"` // 未評価なら nil
+	// EvalPending は作業中のため評価を保留していること。Eval が nil の理由が評価漏れではなく、
+	// まだ終わっていないセッションを途中のまま評価しないためだと区別するために持つ。
+	EvalPending bool `json:"eval_pending,omitempty"`
 
 	// サブエージェント（sidechain）は独立したセッションとしては扱わず、
 	// 委譲元である親セッションにコストを計上する。子は情報量が少なく、
@@ -224,11 +227,12 @@ type OutlierFinding struct {
 // Meta は集計そのものの信頼性に関わる情報。レポートの但し書きに使う。
 type Meta struct {
 	PromptVersion       string   `json:"prompt_version"`
-	UnknownModels       []string `json:"unknown_models"`       // 単価を引けなかったモデル名
-	UnevaluatedSessions int      `json:"unevaluated_sessions"` // 評価に失敗・未実施のセッション数
-	MissingTranscripts  int      `json:"missing_transcripts"`  // 本文が取り込めていないセッション数
-	JudgeCostUSD        float64  `json:"judge_cost_usd"`       // この集計を作るのにかかった評価コスト
-	JudgeSessionIDs     []string `json:"judge_session_ids"`    // 評価実行自体のセッション ID（集計対象から除外する）
+	UnknownModels       []string `json:"unknown_models"`            // 単価を引けなかったモデル名
+	UnevaluatedSessions int      `json:"unevaluated_sessions"`      // 評価に失敗・未実施のセッション数
+	ActiveSessions      int      `json:"active_sessions,omitempty"` // 作業中のため評価を保留したセッション数
+	MissingTranscripts  int      `json:"missing_transcripts"`       // 本文が取り込めていないセッション数
+	JudgeCostUSD        float64  `json:"judge_cost_usd"`            // この集計を作るのにかかった評価コスト
+	JudgeSessionIDs     []string `json:"judge_session_ids"`         // 評価実行自体のセッション ID（集計対象から除外する）
 }
 
 // Series は任意期間の HTML レポート用に、日次の値を時系列で並べたもの。
