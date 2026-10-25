@@ -731,6 +731,16 @@ func classifyEvalFailure(err error) string {
 	}
 }
 
+// evalModel は評価の記録に残すモデル名を返す。バックエンドが実際に使ったモデルを報告して
+// いればそれを、無ければ設定値を使う。judge.model がエイリアス（"haiku" など）でも、記録と
+// 見積もりの実績が実際のモデル単位で分かれるようにするため。
+func evalModel(deps evalDeps, run judge.RunInfo) string {
+	if m := strings.TrimSpace(run.Model); m != "" {
+		return m
+	}
+	return deps.Model
+}
+
 // recordEvalRun は評価 1 回分の実行記録を残す。記録は監視のためのもので、評価結果
 // そのものではない。ここで失敗しても評価は成立しているので、警告だけ出して続行する。
 func recordEvalRun(deps evalDeps, rec store.EvalRunRecord) {
@@ -954,7 +964,7 @@ func evaluateSessions(
 			}
 			recordEvalRun(deps, store.EvalRunRecord{
 				SessionID: o.sessionID, PromptVersion: deps.PromptVersion,
-				Judge: deps.JudgeName, JudgeModel: deps.Model,
+				Judge: deps.JudgeName, JudgeModel: evalModel(deps, o.run),
 				FailureKind: classifyEvalFailure(o.err), FailureReason: o.err.Error(),
 				CostUSD: o.run.CostUSD, RunSessionID: o.run.SessionID,
 			})
@@ -963,12 +973,12 @@ func evaluateSessions(
 		}
 
 		row := bySessionID[o.sessionID]
-		if err := deps.DB.SaveEval(o.sessionID, deps.JudgeName, deps.Model, deps.PromptVersion, row.ContentHash, o.raw,
+		if err := deps.DB.SaveEval(o.sessionID, deps.JudgeName, evalModel(deps, o.run), deps.PromptVersion, row.ContentHash, o.raw,
 			store.EvalRun{CostUSD: o.run.CostUSD, SessionID: o.run.SessionID}); err != nil {
 			reason := fmt.Sprintf("評価結果の保存に失敗しました: %v", err)
 			recordEvalRun(deps, store.EvalRunRecord{
 				SessionID: o.sessionID, PromptVersion: deps.PromptVersion,
-				Judge: deps.JudgeName, JudgeModel: deps.Model,
+				Judge: deps.JudgeName, JudgeModel: evalModel(deps, o.run),
 				FailureKind: store.EvalFailureSave, FailureReason: reason,
 				CostUSD: o.run.CostUSD, RunSessionID: o.run.SessionID,
 			})
@@ -978,7 +988,7 @@ func evaluateSessions(
 
 		recordEvalRun(deps, store.EvalRunRecord{
 			SessionID: o.sessionID, PromptVersion: deps.PromptVersion,
-			Judge: deps.JudgeName, JudgeModel: deps.Model, OK: true,
+			Judge: deps.JudgeName, JudgeModel: evalModel(deps, o.run), OK: true,
 			CostUSD: o.run.CostUSD, RunSessionID: o.run.SessionID,
 		})
 

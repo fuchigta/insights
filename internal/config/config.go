@@ -57,8 +57,10 @@ type CodexSource struct {
 
 // JudgeConfig は AI 評価バックエンドの設定。
 type JudgeConfig struct {
-	Backend     string   `yaml:"backend"` // "claude-cli" など。judge.Judge の Name() と対応
-	Model       string   `yaml:"model"`
+	Backend string `yaml:"backend"` // "claude-cli" など。judge.Judge の Name() と対応
+	// Model は空なら雛形（SaveTemplate）に書き出さない。書き出すと、その時点の既定値が
+	// 設定ファイルに固定され、既定値の更新が届かなくなるため。
+	Model       string   `yaml:"model,omitempty"`
 	Concurrency int      `yaml:"concurrency"`
 	Timeout     Duration `yaml:"timeout"`
 }
@@ -139,6 +141,9 @@ type UpdateConfig struct {
 	Interval Duration `yaml:"interval"`
 }
 
+// DefaultJudgeModel は judge.model の既定値（Claude Code のモデルエイリアス）。
+const DefaultJudgeModel = "haiku"
+
 // Default は既定値を埋めた Config を返す。
 func Default() *Config {
 	return &Config{
@@ -157,8 +162,11 @@ func Default() *Config {
 			},
 		},
 		Judge: JudgeConfig{
-			Backend:     "claude-cli",
-			Model:       "claude-sonnet-5",
+			Backend: "claude-cli",
+			// フルネームで固定すると、新しいモデルが出るたびに既定値が古くなる。
+			// Claude Code のエイリアスにしておけば、その時点の最新の Haiku が使われる。
+			// 評価は構造化された要約と判定で、Haiku で足りる（Sonnet の約 1/20 の単価）。
+			Model:       DefaultJudgeModel,
 			Concurrency: 3,
 			Timeout:     Duration{Duration: 180 * time.Second},
 		},
@@ -229,6 +237,42 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("設定ファイルの解析に失敗しました (%s): %w", resolved, err)
 	}
 	return cfg, nil
+}
+
+// SaveTemplate は既定値の雛形を path に書き出す（insights config init 用）。
+//
+// judge.model は書き出さず、コメントで既定値を示すだけにする。値を書き込むとその時点の
+// 既定値が設定ファイルに固定され、後のバージョンで既定値を更新しても届かなくなる。
+func SaveTemplate(path string) error {
+	c := Default()
+	c.Judge.Model = ""
+
+	resolved, err := resolveConfigPath(path)
+	if err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("設定のシリアライズに失敗しました: %w", err)
+	}
+
+	const judgeKey = "judge:\n"
+	hint := "    # model: " + DefaultJudgeModel + "  # 省略時は insights の既定値（Claude Code のエイリアス）を使う。固定したいときだけ書く\n"
+	text := string(data)
+	i := strings.Index(text, judgeKey)
+	if i < 0 {
+		return fmt.Errorf("設定の雛形に judge セクションが見つかりません")
+	}
+	text = text[:i+len(judgeKey)] + hint + text[i+len(judgeKey):]
+
+	dir := filepath.Dir(resolved)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("設定ディレクトリの作成に失敗しました (%s): %w", dir, err)
+	}
+	if err := os.WriteFile(resolved, []byte(text), 0o644); err != nil {
+		return fmt.Errorf("設定ファイルの書き込みに失敗しました (%s): %w", resolved, err)
+	}
+	return nil
 }
 
 // Save は c を path に書き出す。必要なディレクトリは作成する。

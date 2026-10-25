@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -29,6 +30,10 @@ func TestDefault(t *testing.T) {
 	}
 	if cfg.Judge.Backend != "claude-cli" {
 		t.Errorf("Judge.Backend = %q, want %q", cfg.Judge.Backend, "claude-cli")
+	}
+	// フルネームで固定すると新モデルのたびに古くなるので、Claude Code のエイリアスにしてある。
+	if cfg.Judge.Model != "haiku" {
+		t.Errorf("Judge.Model = %q, want haiku", cfg.Judge.Model)
 	}
 	if cfg.Judge.Concurrency != 3 {
 		t.Errorf("Judge.Concurrency = %d, want 3", cfg.Judge.Concurrency)
@@ -119,6 +124,41 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if got.Pricing.Overrides["claude-sonnet-5"] != cfg.Pricing.Overrides["claude-sonnet-5"] {
 		t.Errorf("Pricing.Overrides round-trip: got %+v, want %+v", got.Pricing.Overrides["claude-sonnet-5"], cfg.Pricing.Overrides["claude-sonnet-5"])
+	}
+}
+
+// TestSaveTemplate_DoesNotPinJudgeModel は、雛形が judge.model を値として書き込まず、
+// 読み直すと既定値（エイリアス）になることを確かめる。書き込むとその時点の既定値が
+// 設定ファイルに固定され、後のバージョンで既定値を更新しても届かなくなる。
+func TestSaveTemplate_DoesNotPinJudgeModel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := SaveTemplate(path); err != nil {
+		t.Fatalf("SaveTemplate() error = %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "model:") {
+			t.Errorf("judge.model が値として書き込まれている: %q", line)
+		}
+	}
+	if !strings.Contains(string(data), "# model: "+DefaultJudgeModel) {
+		t.Errorf("既定値を示すコメントが無い:\n%s", data)
+	}
+
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.Judge.Model != DefaultJudgeModel {
+		t.Errorf("Judge.Model = %q, want %q（省略時は既定値）", got.Judge.Model, DefaultJudgeModel)
+	}
+	// 他の項目は既定値のまま往復する。
+	if got.Judge.Backend != "claude-cli" || got.Judge.Concurrency != 3 {
+		t.Errorf("Judge = %+v, want 既定値", got.Judge)
 	}
 }
 

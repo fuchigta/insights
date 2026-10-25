@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fuchigta/insights/internal/pricing"
 	"github.com/fuchigta/insights/internal/store"
 )
 
@@ -91,6 +92,18 @@ func TestEvalCostEstimator_UsesActuals(t *testing.T) {
 	// 6 件なら ceil(0.9*6)-1 = 5 番目、つまり最大値。安全側に倒すという意図どおり。
 	if want := 0.20; got != want {
 		t.Errorf("perSession() = %v, want %v", got, want)
+	}
+
+	// 設定の書き方が実績の記録名と違っても（ここでは "[1m]" の接尾辞付き）、単価表で
+	// 実際のモデル名に読み替えて同じ実績を引く（実績は claude -p が報告した実際の
+	// モデル名で記録している）。エイリアスの解決自体は pricing のテストで確かめている。
+	prices, err := pricing.Load(nil)
+	if err != nil {
+		t.Fatalf("pricing.Load() error = %v", err)
+	}
+	alias := newEvalCostEstimator(db, prices, "claude-sonnet-5[1m]", judgeBackendClaudeCLI)
+	if got, fromActual := alias.perSession(2); !fromActual || got != 0.20 {
+		t.Errorf("接尾辞付きの設定で perSession() = (%v, %v), want (0.20, true)", got, fromActual)
 	}
 
 	// 別モデルの実績は混ざらない（単価が違うので混ぜると見積もりが壊れる）。

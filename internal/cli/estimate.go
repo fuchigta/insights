@@ -88,7 +88,15 @@ func newEvalCostEstimator(db *store.DB, prices *pricing.Table, model, backend st
 	if db == nil || !e.reportsCost {
 		return e
 	}
-	samples, err := db.RecentEvalCostSamples(model, evalCostSampleLimit)
+	// 実績は実際に使われたモデル名で記録している（internal/cli/judge.go の evalModel）。
+	// 設定がエイリアスなら、単価表でその系列の最新世代に読み替えて実績を引く。
+	sampleModel := model
+	if prices != nil {
+		if resolved, ok := prices.ResolveAlias(model); ok {
+			sampleModel = resolved
+		}
+	}
+	samples, err := db.RecentEvalCostSamples(sampleModel, evalCostSampleLimit)
 	if err != nil {
 		return e
 	}
