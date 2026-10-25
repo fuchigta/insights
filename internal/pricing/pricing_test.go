@@ -40,8 +40,11 @@ func TestLoad_EmbeddedTableIsPriced(t *testing.T) {
 		}
 	}
 
-	if unpriced := tbl.UnpricedModels(); len(unpriced) != 0 {
-		t.Errorf("UnpricedModels() = %v, want 空（全モデルに実際の単価が設定済み）", unpriced)
+	// codex-auto-review は ChatGPT サインインでは無料で API 単価も無いため、
+	// prices_manual.json で意図的に全項目 0 にしている。それ以外に 0 のモデルがあってはならない。
+	unpriced := tbl.UnpricedModels()
+	if len(unpriced) != 1 || unpriced[0] != "codex-auto-review" {
+		t.Errorf("UnpricedModels() = %v, want [codex-auto-review]（それ以外は実際の単価が設定済み）", unpriced)
 	}
 }
 
