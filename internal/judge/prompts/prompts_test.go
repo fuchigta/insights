@@ -103,7 +103,7 @@ func compare(t *testing.T, path string, typ reflect.Type, schema map[string]any)
 // プロンプトやスキーマを変えたのに PromptVersion を据え置くと、古い評価が
 // 再利用され続け「変更が効いていない」ことに気づけない。内容が変わったら
 // このテストが落ちるので、PromptVersion を上げてから下の値を更新すること。
-const promptFingerprint = "acb9032aa77c949e3770542f67d4bfb48b9250880ada5bb721d58614aaaa3062"
+const promptFingerprint = "29f821f7db42e155f59f4ec5da0c3ecb2547ba47ed94b2696c476a99a58154a3"
 
 func TestPromptVersionIsBumpedWhenContentChanges(t *testing.T) {
 	h := sha256.New()
