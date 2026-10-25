@@ -17,7 +17,8 @@ judge:
   # model: haiku  # 省略時は insights の既定値（Claude Code のエイリアス）を使う。固定したいときだけ書く
   backend: claude-cli
   concurrency: 3
-  timeout: 3m0s
+  # 最後の記録からこの時間以内のセッションは作業中とみなし、評価を見送る（0 で無効。--include-active で一回だけ無視できる）
+  active_grace: 30m0s
 evidence:
   git: true
   gh: auto
@@ -56,6 +57,7 @@ update:
 | `judge.model` | 評価に使うモデル。バックエンドに合わせて書く（`codex-cli` なら `gpt-5.5` など）。`haiku` / `sonnet` / `opus` のような Claude Code のエイリアスも書ける。**書かなければ既定値が使われ、insights の更新で既定値が変わればそれに追従する**（`config init` の雛形もこの行をコメントで書き出す） | `haiku` |
 | `judge.concurrency` | 評価の並列実行数 | `3` |
 | `judge.timeout` | 評価バックエンド 1 回の実行タイムアウト | `3m0s`（180秒） |
+| `judge.active_grace` | 最後の記録からこの時間以内のセッションを「作業中」とみなし、評価の対象から外す猶予。ログには終了の記録が無いため、経過時間で判断します。`0` で無効。Go の duration 文字列（`30m` / `1h` など）で書く。`insights judge` / `daily` / `run` の `--include-active` でその実行だけ無視できます | `30m0s`（30分） |
 | `evidence.git` | git commit 収集の有効/無効 | `true` |
 | `evidence.gh` | `gh`（GitHub CLI）による PR/Issue 収集。`true`/`false`/`auto`（見つかれば使う） | `auto` |
 | `evidence.glab` | `glab`（GitLab CLI）による MR/Issue 収集。同上 | `auto` |

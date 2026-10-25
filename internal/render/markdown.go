@@ -359,6 +359,10 @@ func sessionSummary(s rollup.SessionCard) string {
 			return sum
 		}
 	}
+	if s.EvalPending {
+		// 途中のログから推測した要約を載せない。
+		return "(作業中のため評価保留)"
+	}
 	if title := strings.TrimSpace(s.Title); title != "" {
 		return truncateRunes(title, titleMaxRunes) + "（未評価）"
 	}
@@ -370,6 +374,9 @@ func sessionSummary(s rollup.SessionCard) string {
 
 // sessionOutcome はセッションの達成度表示（日本語）。未評価なら「未評価」。
 func sessionOutcome(s rollup.SessionCard) string {
+	if s.Eval == nil && s.EvalPending {
+		return "作業中（評価保留）"
+	}
 	if s.Eval == nil || strings.TrimSpace(s.Eval.Outcome) == "" {
 		return "未評価"
 	}
@@ -524,6 +531,12 @@ func writeCaveats(b *strings.Builder, facets rollup.Facets, meta rollup.Meta) {
 		caveats = append(caveats, fmt.Sprintf(
 			"%d 件のセッションが未評価のため、この振り返りは全セッションを網羅していません。",
 			meta.UnevaluatedSessions))
+	}
+
+	if meta.ActiveSessions != 0 {
+		caveats = append(caveats, fmt.Sprintf(
+			"%d 件のセッションは作業中のため評価を保留しています（時間・コストは集計に含まれます）。",
+			meta.ActiveSessions))
 	}
 
 	if len(caveats) == 0 {

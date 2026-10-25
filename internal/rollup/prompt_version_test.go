@@ -13,7 +13,7 @@ import (
 // PromptVersion（キャッシュキーに使われる）を上げずにプロンプトやスキーマだけ変更すると
 // 古い結果が使い回されてしまう事故を防ぐ。内容が変わったらこのテストが落ちるので、
 // PromptVersion を上げてから下の値を更新すること。
-const promptFingerprint = "fddebc56e51fbd2e2129ae513fef5a4d68bbc28c5d745e0c454b959a3731eb3f"
+const promptFingerprint = "bc410da6f9ebfe7f84cd706715eb6a27fd5c06361655b7ee4880d0e32aec356a"
 
 func TestPromptVersionIsBumpedWhenContentChanges(t *testing.T) {
 	h := sha256.New()

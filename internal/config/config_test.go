@@ -291,6 +291,7 @@ func TestValidate(t *testing.T) {
 		{"empty language", func(c *Config) { c.Language = "" }, true},
 		{"empty backend", func(c *Config) { c.Judge.Backend = "" }, true},
 		{"zero concurrency", func(c *Config) { c.Judge.Concurrency = 0 }, true},
+		{"negative active_grace", func(c *Config) { c.Judge.ActiveGrace = Duration{Duration: -1} }, true},
 		{"negative timeout", func(c *Config) { c.Judge.Timeout = Duration{Duration: -1} }, true},
 		{"invalid gh", func(c *Config) { c.Evidence.Gh = Tristate("maybe") }, true},
 		{"invalid glab", func(c *Config) { c.Evidence.Glab = Tristate("maybe") }, true},

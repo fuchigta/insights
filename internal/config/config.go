@@ -63,6 +63,10 @@ type JudgeConfig struct {
 	Model       string   `yaml:"model,omitempty"`
 	Concurrency int      `yaml:"concurrency"`
 	Timeout     Duration `yaml:"timeout"`
+	// ActiveGrace は、最後の記録からこの時間以内のセッションを「作業中」とみなして評価を
+	// 見送る猶予。ログには終了の記録が無いので、経過時間でしか終わったかを判断できない。
+	// 0 で無効（作業中の判定をしない）。
+	ActiveGrace Duration `yaml:"active_grace"`
 }
 
 // EvidenceConfig は成果物（git/gh/glab）収集の設定。
@@ -144,6 +148,10 @@ type UpdateConfig struct {
 // DefaultJudgeModel は judge.model の既定値（Claude Code のモデルエイリアス）。
 const DefaultJudgeModel = "haiku"
 
+// DefaultActiveGrace は judge.active_grace の既定値。日報を作る直前まで続いていた
+// セッションを途中のまま評価しないための目安で、短い離席では作業中のままとみなす長さ。
+const DefaultActiveGrace = 30 * time.Minute
+
 // Default は既定値を埋めた Config を返す。
 func Default() *Config {
 	return &Config{
@@ -169,6 +177,7 @@ func Default() *Config {
 			Model:       DefaultJudgeModel,
 			Concurrency: 3,
 			Timeout:     Duration{Duration: 180 * time.Second},
+			ActiveGrace: Duration{Duration: DefaultActiveGrace},
 		},
 		Evidence: EvidenceConfig{
 			Git:          true,
@@ -265,6 +274,14 @@ func SaveTemplate(path string) error {
 	}
 	text = text[:i+len(judgeKey)] + hint + text[i+len(judgeKey):]
 
+	const graceKey = "    active_grace:"
+	graceHint := "    # 最後の記録からこの時間以内のセッションは作業中とみなし、評価を見送る（0 で無効。--include-active で一回だけ無視できる）\n"
+	j := strings.Index(text, graceKey)
+	if j < 0 {
+		return fmt.Errorf("設定の雛形に judge.active_grace が見つかりません")
+	}
+	text = text[:j] + graceHint + text[j:]
+
 	dir := filepath.Dir(resolved)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("設定ディレクトリの作成に失敗しました (%s): %w", dir, err)
@@ -326,6 +343,9 @@ func (c *Config) Validate() []error {
 	}
 	if c.Judge.Timeout.Duration <= 0 {
 		errs = append(errs, fmt.Errorf("judge.timeout は正の値である必要があります: %s", c.Judge.Timeout.Duration))
+	}
+	if c.Judge.ActiveGrace.Duration < 0 {
+		errs = append(errs, fmt.Errorf("judge.active_grace は 0 以上である必要があります: %s", c.Judge.ActiveGrace.Duration))
 	}
 	if !c.Evidence.Gh.Valid() {
 		errs = append(errs, fmt.Errorf("evidence.gh の値が不正です (true/false/auto のいずれか): %q", c.Evidence.Gh))

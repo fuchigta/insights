@@ -102,6 +102,9 @@ type SessionData struct {
 	// 呼び出し側（daily.go）の責務とし、rollup パッケージは model.Evidence の形そのものに
 	// 依存しない（Evidence int と同じ設計方針）。
 	PullRequestCount int
+	// Active は作業中（最後の記録から間もない）とみなして評価を見送ったセッション。
+	// 時間・コストの集計には含めるが、中身は評価されていないので要約させない。
+	Active bool
 }
 
 // modelAgg はモデル別集計の作業用アキュムレータ。
@@ -132,6 +135,7 @@ type sessionCalc struct {
 	eval             *model.Eval
 	evidence         int
 	pullRequestCount int
+	evalPending      bool // 作業中のため評価を保留している
 }
 
 // newFacets は空（nil ではない）の Facets を返す。評価が 1 件も無くても
@@ -320,7 +324,10 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 		}
 		pa.stat.PullRequestCount += sd.PullRequestCount
 
-		if sd.Eval == nil {
+		if sd.Eval == nil && sd.Active {
+			// 評価漏れではなく、作業中のため意図して見送っている。評価漏れの件数には混ぜない。
+			d.Meta.ActiveSessions++
+		} else if sd.Eval == nil {
 			// sidechain も含めて全セッションが評価対象なので、未評価はすべて評価漏れ。
 			d.Meta.UnevaluatedSessions++
 		} else if !row.IsSidechain {
@@ -352,6 +359,7 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 			eval:             sd.Eval,
 			evidence:         sd.Evidence,
 			pullRequestCount: sd.PullRequestCount,
+			evalPending:      sd.Eval == nil && sd.Active,
 		}
 		calcOrder = append(calcOrder, row.SessionID)
 	}
@@ -385,6 +393,7 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 			EvidenceCount:    c.evidence,
 			PullRequestCount: c.pullRequestCount,
 			Eval:             c.eval,
+			EvalPending:      c.evalPending,
 		}
 		cardByID[id] = card
 		projectCards[c.row.ProjectPath] = append(projectCards[c.row.ProjectPath], card)
