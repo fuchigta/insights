@@ -6,6 +6,11 @@
   金額のフィールドが無いため、自前でトークン数を集計し `internal/pricing/prices.json`
   （1M トークンあたりの USD。`claude-*` は Anthropic、`gpt-*` は OpenAI の公開 API レート）を
   掛けて算出しています。契約単価が異なる場合は設定の `pricing.overrides` で上書きできます。
+  単価表は [LiteLLM](https://github.com/BerriAI/litellm) の価格表から**週 1 回の GitHub Actions
+  （`.github/workflows/prices-sync.yml`）が変換し、差分があれば PR を作ります**。人がレビューして
+  から取り込むので、実行時に外へ取りに行くことはありません（オフラインで動き、`docs/privacy.md` の
+  方針も変わりません）。`prices.json` は生成物なので手で編集せず、LiteLLM に無い・違う扱いにしたい
+  モデルは `internal/pricing/prices_manual.json` に書きます（同期結果より優先されます）。
   単価表や `pricing.overrides` を変えたときは、次の `insights ingest`（`insights run` を含む）で
   取り込み済みの全セッションの金額が新しい単価で計算し直されます。日報・振り返りに反映するには、
   その日の `insights daily` を作り直してください。
@@ -55,7 +60,9 @@
 
 - **キャッシュ書き込みは別建てで課金されません。** OpenAI 側は書き込み分を通常の入力として
   課金するため `cache_write_5m` / `cache_write_1h` は 0 で、`cache_read` に公開されている
-  cached input のレートが入っています。レポートに出る「キャッシュ作成トークン」は、
+  cached input のレートが入っています。LiteLLM の `gpt-*` には書き込み単価が載っていることが
+  ありますが、取り込みでは常に 0 にします。Codex の `input_tokens` は書き込み分を含む合計で、
+  insights は書き込み分を通常の入力として課金しているため、入れると二重に数えることになるからです。レポートに出る「キャッシュ作成トークン」は、
   金額ではなく「どれだけキャッシュに載ったか」を見るための数字になります
 - **`gpt-*-pro` はキャッシュ入力の提供が無い**ため `cache_read` も 0 です
 
@@ -77,8 +84,9 @@ Codex が報告するトークンは、キャッシュ読み取り分を入力�
   未知だと分かるほうが有用なためです。日報の但し書きと `ingest` の警告に出るので、
   そのとき `pricing.overrides` に足すか、単価表の更新を待ってください
 
-Codex の自動承認レビュー（ガーディアン）が使う `codex-auto-review` は API 単価が公開されていないため、
-単価表に載せていません。常に「単価未登録」として出ます。
+Codex の自動承認レビュー（ガーディアン）が使う `codex-auto-review` は、ChatGPT アカウントで
+サインインしている場合は無料で、API では提供されていません（LiteLLM にもありません）。そのため
+`prices_manual.json` で全項目 0 円として登録しており、「単価未登録」としては出ません。
 
 なお ChatGPT のプランで Codex を使っている場合、トークンあたりの従量課金ではなくプランの
 利用枠を消費します。**その場合ここで出る金額は「API で同じことをしたらいくらか」の目安**であって、

@@ -1,0 +1,16 @@
+{
+  "_note": "LiteLLM に無い、または LiteLLM と違う扱いにしたいモデルをここに置く。cmd/pricesync が同期結果より優先して prices.json に重ねる。prices.json は生成物なので手で編集しない。",
+  "non_billable": [
+    "<synthetic>"
+  ],
+  "models": {
+    "codex-auto-review": {
+      "_note": "Codex の自動承認レビュー（ガーディアン）。ChatGPT アカウントでサインインしている場合は無料で、API では提供されていない（LiteLLM にも無い）",
+      "input": 0,
+      "output": 0,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    }
+  }
+}
