@@ -179,6 +179,8 @@ Claude Code のワークツリー（`<project>/.claude/worktree/<name>`）で行
   畳まれます。** ただし成果が資産として残ったセッション（`outcome=achieved` かつ
   `artifact_value=durable`）は、小さくても個別に掲載されます。末尾に評価軸の全体分布（参考情報）・
   コストに見合わなかったセッション・新しい改善提案・前回までの提案の検証結果が続きます。
+  単価表に無いモデルの使用量は金額に含まれません。日報・振り返りはこれを「無料」ではなく
+  **金額不明**として扱うよう AI に指示しており、コストに見合ったかは金額以外の材料で判断させています。
 - `~/.insights/reports/meta/YYYY-MM-DD.yaml` — **サイドカー YAML**。日報・振り返りが参照する完全な
   構造化データ（モデル別・プロジェクト別集計、評価軸ごとの全分布、評価コスト、単価未登録モデルなど）。
 - 任意期間の HTML レポート（既定 `~/.insights/reports/insights-<from>_<to>.html`。`insights report --out`

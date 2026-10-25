@@ -146,6 +146,12 @@ func TestBuildDaily_UnknownModelNotSilentlyZero(t *testing.T) {
 	if !reflect.DeepEqual(d.Sessions[0].Models, wantModels) {
 		t.Errorf("Sessions[0].Models = %v, want %v", d.Sessions[0].Models, wantModels)
 	}
+
+	// プロジェクト別のコスト・比率は登録済みぶんだけなので、金額不明のセッションが
+	// あったことを並べて持つ（振り返りの AI が「無料だった」と読まないように）。
+	if len(d.ByProject) != 1 || d.ByProject[0].UnpricedSessions != 1 {
+		t.Errorf("ByProject = %+v, want UnpricedSessions = 1", d.ByProject)
+	}
 }
 
 func TestBuildDaily_FacetsAggregation(t *testing.T) {

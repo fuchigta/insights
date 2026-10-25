@@ -25,7 +25,7 @@ var retroPromptTemplate string
 // 規約: これらのプロンプトの内容を変更したら、必ずこの値も変更すること。
 // 生成物の解釈（JSON スキーマ・観点）が変わった過去の Daily と新しいプロンプトの結果を
 // 混同しないようにするための目印であり、呼び出し側が Meta やキャッシュキーに使うことを想定する。
-const PromptVersion = "rollup-synth-v8"
+const PromptVersion = "rollup-synth-v9"
 
 // dailySchema は日報生成に期待する出力の JSON Schema。
 // internal/judge のバックエンドが `claude -p --json-schema` にそのまま渡せるよう、
@@ -198,6 +198,7 @@ type projectContext struct {
 	DurationMinutes   float64       `json:"duration_minutes"`
 	CostUSD           float64       `json:"cost_usd"`
 	CostShare         float64       `json:"cost_share"`
+	UnpricedSessions  int           `json:"unpriced_sessions,omitempty"`
 	Goal              string        `json:"goal,omitempty"`
 	EvaluatedSessions int           `json:"evaluated_sessions"`
 	Facets            Facets        `json:"facets"`
@@ -217,6 +218,7 @@ func toProjectContext(stats []ProjectStat) []projectContext {
 			DurationMinutes:   p.DurationMinutes,
 			CostUSD:           p.CostUSD,
 			CostShare:         p.CostShare,
+			UnpricedSessions:  p.UnpricedSessions,
 			Goal:              p.Goal,
 			EvaluatedSessions: p.EvaluatedSessions,
 			Facets:            p.Facets,
