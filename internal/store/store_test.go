@@ -138,6 +138,56 @@ func TestSaveSession_Idempotent(t *testing.T) {
 	}
 }
 
+// TestRepriceUsage は、保存済みの使用量の金額を計算し直し、変わった行だけを
+// 更新することを確かめる。単価表を直しても、取り込み直さないファイルの金額は
+// 古いまま残るため、この経路で追従させる。
+func TestRepriceUsage(t *testing.T) {
+	d := openTestDB(t)
+	if err := d.SaveSession(testSession("sess-1"), []UsageCost{{Seq: 2, CostUSD: 0.0015, Known: true}}); err != nil {
+		t.Fatalf("SaveSession() error = %v", err)
+	}
+
+	var seen UsageRow
+	n, err := d.RepriceUsage(func(r UsageRow) (float64, bool) {
+		seen = r
+		return 0.001, true
+	})
+	if err != nil {
+		t.Fatalf("RepriceUsage() error = %v", err)
+	}
+	if n != 1 {
+		t.Errorf("更新件数 = %d, want 1", n)
+	}
+	if seen.Model != "claude-sonnet-5" || seen.InputTokens != 100 || seen.OutputTokens != 50 {
+		t.Errorf("price に渡った行 = %+v, want 保存済みのモデルとトークン数", seen)
+	}
+
+	rows, err := d.UsageInRange(time.Time{}, time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("UsageInRange() error = %v", err)
+	}
+	if len(rows) != 1 || rows[0].CostUSD != 0.001 || !rows[0].CostKnown {
+		t.Fatalf("再計算後の行 = %+v, want CostUSD=0.001 Known=true", rows)
+	}
+
+	// 同じ単価ならもう書き込まない。
+	if n, err := d.RepriceUsage(func(UsageRow) (float64, bool) { return 0.001, true }); err != nil || n != 0 {
+		t.Errorf("同じ単価での再計算 = (%d, %v), want (0, nil)", n, err)
+	}
+
+	// 単価が引けなくなったら、金額は 0・未知として保存する（SaveSession と同じ扱い）。
+	if _, err := d.RepriceUsage(func(UsageRow) (float64, bool) { return 123, false }); err != nil {
+		t.Fatalf("RepriceUsage() error = %v", err)
+	}
+	rows, err = d.UsageInRange(time.Time{}, time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("UsageInRange() error = %v", err)
+	}
+	if rows[0].CostUSD != 0 || rows[0].CostKnown {
+		t.Errorf("未知になった行 = %+v, want CostUSD=0 Known=false", rows[0])
+	}
+}
+
 func TestSaveSession_ReplacesMessagesOnResave(t *testing.T) {
 	d := openTestDB(t)
 	s := testSession("sess-replace")

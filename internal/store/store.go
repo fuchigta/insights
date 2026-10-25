@@ -760,6 +760,90 @@ func (d *DB) UsageInRange(from, to time.Time) ([]UsageRow, error) {
 	return out, nil
 }
 
+// RepriceUsage は usage_events の全行について price で金額を計算し直し、保存済みの値と
+// 違う行だけを更新する。更新した行数を返す。
+//
+// 金額は取り込み時に確定して保存しており、ログファイルが変わらない限り取り込み直さない。
+// そのままでは単価表や pricing.overrides を直しても過去のセッションの金額が古いまま
+// 残るため、トークン数から計算し直す経路を別に持つ。price は呼び出し側が単価表から作る
+// （store は internal/pricing に依存しない。UsageCost と同じ方針）。
+func (d *DB) RepriceUsage(price func(UsageRow) (usd float64, known bool)) (int, error) {
+	type key struct {
+		sessionID string
+		seq       int
+	}
+	type change struct {
+		key   key
+		usd   float64
+		known bool
+	}
+
+	rows, err := d.db.Query(`
+		SELECT session_id, seq, model, input_tokens, output_tokens, thinking_tokens,
+		       cache_creation_5m, cache_creation_1h, cache_read, cost_usd, cost_known
+		FROM usage_events
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("usage_events の取得に失敗: %w", err)
+	}
+	var changes []change
+	for rows.Next() {
+		var (
+			r         UsageRow
+			k         key
+			costKnown int
+		)
+		if err := rows.Scan(&k.sessionID, &k.seq, &r.Model, &r.InputTokens, &r.OutputTokens,
+			&r.ThinkingTokens, &r.CacheCreation5m, &r.CacheCreation1h, &r.CacheRead,
+			&r.CostUSD, &costKnown); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("usage_events 行の読み取りに失敗: %w", err)
+		}
+		r.SessionID = k.sessionID
+		r.CostKnown = costKnown != 0
+
+		usd, known := price(r)
+		if !known {
+			usd = 0 // SaveSession と同じく、未知モデルは 0 として保存する
+		}
+		if usd != r.CostUSD || known != r.CostKnown {
+			changes = append(changes, change{key: k, usd: usd, known: known})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, fmt.Errorf("usage_events の走査に失敗: %w", err)
+	}
+	// SQLite は読み取り中の結果セットを開いたまま同じ接続で書き込めないため、
+	// 先に読み切ってから更新する。
+	rows.Close()
+
+	if len(changes) == 0 {
+		return 0, nil
+	}
+
+	tx, err := d.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("トランザクションの開始に失敗: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }() // Commit 済みなら no-op
+
+	stmt, err := tx.Prepare(`UPDATE usage_events SET cost_usd = ?, cost_known = ? WHERE session_id = ? AND seq = ?`)
+	if err != nil {
+		return 0, fmt.Errorf("usage_events 更新の準備に失敗: %w", err)
+	}
+	defer stmt.Close()
+	for _, c := range changes {
+		if _, err := stmt.Exec(c.usd, boolToInt(c.known), c.key.sessionID, c.key.seq); err != nil {
+			return 0, fmt.Errorf("usage_events(%s, seq=%d) の更新に失敗: %w", c.key.sessionID, c.key.seq, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("トランザクションのコミットに失敗: %w", err)
+	}
+	return len(changes), nil
+}
+
 // SaveEvidence は (session_id, kind, ref) をキーに UPSERT する。
 func (d *DB) SaveEvidence(items []model.Evidence) error {
 	if len(items) == 0 {

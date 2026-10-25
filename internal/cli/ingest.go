@@ -142,26 +142,28 @@ type evidenceSummary struct {
 
 // ingestResult は `insights ingest` の実行結果全体。--json ではこの構造体をそのまま出す。
 type ingestResult struct {
-	Mode                      string          `json:"mode"` // "all" | "since" | "incremental"
-	Since                     string          `json:"since,omitempty"`
-	DryRun                    bool            `json:"dry_run"`
-	Discovered                int             `json:"discovered"`
-	Ingested                  int             `json:"ingested"`
-	SkippedUpToDate           int             `json:"skipped_up_to_date"`
-	SkippedExcludedProject    int             `json:"skipped_excluded_project"`
-	SkippedExcludedEntrypoint int             `json:"skipped_excluded_entrypoint"`
-	SkippedJudgeWorkspace     int             `json:"skipped_judge_workspace"`
-	ParseFailed               int             `json:"parse_failed"`
-	ParseFailures             []string        `json:"parse_failures,omitempty"`
-	TotalInputTokens          int             `json:"total_input_tokens"`
-	TotalOutputTokens         int             `json:"total_output_tokens"`
-	TotalCacheReadTokens      int             `json:"total_cache_read_tokens"`
-	TotalCacheCreationTokens  int             `json:"total_cache_creation_tokens"`
-	EstimatedCostUSD          float64         `json:"estimated_cost_usd"`
-	UnknownModels             []string        `json:"unknown_models,omitempty"`
-	Evidence                  evidenceSummary `json:"evidence"`
-	Interrupted               bool            `json:"interrupted,omitempty"`
-	DurationSeconds           float64         `json:"duration_seconds"`
+	Mode                      string   `json:"mode"` // "all" | "since" | "incremental"
+	Since                     string   `json:"since,omitempty"`
+	DryRun                    bool     `json:"dry_run"`
+	Discovered                int      `json:"discovered"`
+	Ingested                  int      `json:"ingested"`
+	SkippedUpToDate           int      `json:"skipped_up_to_date"`
+	SkippedExcludedProject    int      `json:"skipped_excluded_project"`
+	SkippedExcludedEntrypoint int      `json:"skipped_excluded_entrypoint"`
+	SkippedJudgeWorkspace     int      `json:"skipped_judge_workspace"`
+	ParseFailed               int      `json:"parse_failed"`
+	ParseFailures             []string `json:"parse_failures,omitempty"`
+	TotalInputTokens          int      `json:"total_input_tokens"`
+	TotalOutputTokens         int      `json:"total_output_tokens"`
+	TotalCacheReadTokens      int      `json:"total_cache_read_tokens"`
+	TotalCacheCreationTokens  int      `json:"total_cache_creation_tokens"`
+	EstimatedCostUSD          float64  `json:"estimated_cost_usd"`
+	UnknownModels             []string `json:"unknown_models,omitempty"`
+	// RepricedUsageEvents は、単価表の変更で金額を計算し直した取り込み済みの usage 件数。
+	RepricedUsageEvents int             `json:"repriced_usage_events"`
+	Evidence            evidenceSummary `json:"evidence"`
+	Interrupted         bool            `json:"interrupted,omitempty"`
+	DurationSeconds     float64         `json:"duration_seconds"`
 }
 
 // runIngest は ingest サブコマンドの本体（cobra RunE から呼ばれる）。ingestRun を実行し、
@@ -419,6 +421,26 @@ resultsLoop:
 				break resultsLoop
 			}
 		}
+	}
+
+	// 取り込み済みのセッションの金額を、今の単価表で計算し直す。取り込み直さないファイルの
+	// 金額は取り込んだ時点の単価のまま残るため、単価表や pricing.overrides の更新が過去分に
+	// 届かない。差分のある行だけを書くので、単価が変わっていなければ書き込みは発生しない。
+	if !opts.DryRun && !interrupted {
+		repriced, err := db.RepriceUsage(func(r store.UsageRow) (float64, bool) {
+			return priceTable.Cost(r.Model, model.Usage{
+				InputTokens:     r.InputTokens,
+				OutputTokens:    r.OutputTokens,
+				ThinkingTokens:  r.ThinkingTokens,
+				CacheRead:       r.CacheRead,
+				CacheCreation5m: r.CacheCreation5m,
+				CacheCreation1h: r.CacheCreation1h,
+			})
+		})
+		if err != nil {
+			return nil, fmt.Errorf("取り込み済みの金額の再計算に失敗しました: %w", err)
+		}
+		result.RepricedUsageEvents = repriced
 	}
 
 	result.Interrupted = interrupted
@@ -746,6 +768,9 @@ func renderIngestHuman(w io.Writer, r *ingestResult) error {
 		for _, m := range r.UnknownModels {
 			fmt.Fprintf(w, "  - %s\n", m)
 		}
+	}
+	if r.RepricedUsageEvents > 0 {
+		fmt.Fprintf(w, "単価表の変更により、取り込み済みの使用量 %d 件の金額を計算し直しました。\n", r.RepricedUsageEvents)
 	}
 	fmt.Fprintln(w)
 

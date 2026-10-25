@@ -6,6 +6,9 @@
   金額のフィールドが無いため、自前でトークン数を集計し `internal/pricing/prices.json`
   （1M トークンあたりの USD。`claude-*` は Anthropic、`gpt-*` は OpenAI の公開 API レート）を
   掛けて算出しています。契約単価が異なる場合は設定の `pricing.overrides` で上書きできます。
+  単価表や `pricing.overrides` を変えたときは、次の `insights ingest`（`insights run` を含む）で
+  取り込み済みの全セッションの金額が新しい単価で計算し直されます。日報・振り返りに反映するには、
+  その日の `insights daily` を作り直してください。
 - **`claude -p` は API の従量枠を消費します（対話的な Claude Code のセッションとは別枠です）。**
   `insights judge` / `insights daily` / `insights run` はいずれも内部で `claude -p` を呼びます。対話的に
   使う Claude Code のセッションはサブスクリプションの範囲内で完結しますが、`claude -p` は API 利用額の
