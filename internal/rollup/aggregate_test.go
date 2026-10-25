@@ -596,6 +596,62 @@ func TestBuildDaily_WorktreeSidechainIsItsOwnCard(t *testing.T) {
 	}
 }
 
+// TestBuildDaily_ChildModelsAndUnpricedOnParent は、子のモデルと単価未登録が親のカードに
+// 載ることを確かめる。子はカードにならないので、これが無いと by_model に出るモデルの
+// 持ち主が分からず、日報の AI が別のセッションのものとして書く（実際に起きた）。
+func TestBuildDaily_ChildModelsAndUnpricedOnParent(t *testing.T) {
+	base := mustTime(t, "2026-10-25T05:33:06Z")
+	in := DailyInput{
+		Date:   "2026-10-25",
+		Prices: testPrices(t),
+		Loc:    time.FixedZone("JST", 9*60*60),
+		Sessions: []SessionData{
+			{
+				Row: store.SessionRow{
+					SessionID: "s-parent", ProjectPath: "/p", ProjectLabel: "p", Entrypoint: "cli",
+					StartedAt: base, EndedAt: base.Add(4 * time.Minute),
+				},
+				Usage: []store.UsageRow{
+					{SessionID: "s-parent", Model: "gpt-6-luna", InputTokens: 1, CostUSD: 0.01, CostKnown: true},
+				},
+			},
+			{
+				Row: store.SessionRow{
+					SessionID: "s-guardian", ProjectPath: "/p", ProjectLabel: "p", Entrypoint: "subagent_guardian",
+					IsSidechain: true, ParentSessionID: "s-parent",
+					StartedAt: base.Add(time.Second), EndedAt: base.Add(3 * time.Minute),
+				},
+				Usage: []store.UsageRow{
+					{SessionID: "s-guardian", Model: "codex-auto-review", InputTokens: 1, CostKnown: false},
+				},
+			},
+		},
+	}
+
+	d, err := BuildDaily(in)
+	if err != nil {
+		t.Fatalf("BuildDaily() error = %v", err)
+	}
+	if len(d.Sessions) != 1 {
+		t.Fatalf("len(Sessions) = %d, want 1", len(d.Sessions))
+	}
+	parent := d.Sessions[0]
+	if !reflect.DeepEqual(parent.ChildModels, []string{"codex-auto-review"}) {
+		t.Errorf("ChildModels = %v, want [codex-auto-review]", parent.ChildModels)
+	}
+	if !parent.ChildUnpriced {
+		t.Error("ChildUnpriced = false, want true（子の単価未登録が合計コストから漏れていることを示せない）")
+	}
+	if !parent.Priced {
+		t.Error("Priced = false, want true（親自身のぶんは単価登録済み）")
+	}
+
+	// 開始時刻は日付境界と同じタイムゾーンで渡す。UTC のままだと AI が 14:33 を「05:33（朝）」と読む。
+	if got := parent.StartedAt.Format("15:04 -07:00"); got != "14:33 +09:00" {
+		t.Errorf("StartedAt = %s, want 14:33 +09:00", got)
+	}
+}
+
 func TestBuildDaily_SidechainFoldedIntoParent(t *testing.T) {
 	prices := testPrices(t)
 	base := mustTime(t, "2026-08-29T01:00:00Z")

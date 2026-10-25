@@ -367,12 +367,14 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 			continue
 		}
 		card := &SessionCard{
-			SessionID:        c.row.SessionID,
-			ProjectLabel:     c.row.ProjectLabel,
-			Worktree:         c.row.Worktree,
-			Title:            c.row.Title,
-			FirstPrompt:      c.row.FirstPrompt,
-			StartedAt:        c.row.StartedAt,
+			SessionID:    c.row.SessionID,
+			ProjectLabel: c.row.ProjectLabel,
+			Worktree:     c.row.Worktree,
+			Title:        c.row.Title,
+			FirstPrompt:  c.row.FirstPrompt,
+			// DB の時刻は UTC。そのまま渡すと日報・振り返りの AI が UTC を現地時刻と
+			// 読み違え、午後の作業を「朝」と書く。日付境界と同じ loc に揃えて渡す。
+			StartedAt:        c.row.StartedAt.In(loc),
 			DurationMinutes:  c.duration,
 			IsSidechain:      c.row.IsSidechain,
 			Entrypoint:       c.row.Entrypoint,
@@ -402,6 +404,10 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 			if parent, ok := cardByID[c.row.ParentSessionID]; ok {
 				parent.ChildSessions++
 				parent.ChildCostUSD += c.cost
+				parent.ChildModels = mergeSortedUnique(parent.ChildModels, c.models)
+				if !c.allKnown {
+					parent.ChildUnpriced = true
+				}
 				continue
 			}
 		}
@@ -427,6 +433,7 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 	}
 
 	// ---- Pass 4: TotalCostUSD = CostUSD + ChildCostUSD を確定させる ----
+	// （ChildUnpriced が立っていれば、この合計には単価未登録の子のぶんが含まれない）
 	for _, card := range cardByID {
 		card.TotalCostUSD = card.CostUSD + card.ChildCostUSD
 	}
@@ -640,5 +647,23 @@ func copyIntMap(m map[string]int) map[string]int {
 	for k, v := range m {
 		out[k] = v
 	}
+	return out
+}
+
+// mergeSortedUnique は a と b を合わせ、重複を除いてアルファベット順にした新しいスライスを返す。
+// SessionCard.Models と同じ並びにそろえ、入力の順序で出力が揺れないようにする。
+func mergeSortedUnique(a, b []string) []string {
+	set := make(map[string]struct{}, len(a)+len(b))
+	for _, s := range a {
+		set[s] = struct{}{}
+	}
+	for _, s := range b {
+		set[s] = struct{}{}
+	}
+	out := make([]string, 0, len(set))
+	for s := range set {
+		out = append(out, s)
+	}
+	sort.Strings(out)
 	return out
 }

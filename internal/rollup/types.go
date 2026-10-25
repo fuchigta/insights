@@ -143,6 +143,13 @@ type SessionCard struct {
 	// 単独で並べても価値の判断材料にならないため。
 	ChildSessions int     `json:"child_sessions"`
 	ChildCostUSD  float64 `json:"child_cost_usd"`
+	// ChildModels は子が使ったモデル（重複なし・アルファベット順）。子は独立したカードに
+	// ならないため、これが無いと by_model に出るモデルがどのセッションのものか分からず、
+	// 日報の AI が別のセッションに結び付けて書く。
+	ChildModels []string `json:"child_models,omitempty"`
+	// ChildUnpriced は単価未登録のモデルを使った子があるか。立っていれば ChildCostUSD と
+	// TotalCostUSD はそのぶんを含まない。Priced は親自身のぶんしか表さない。
+	ChildUnpriced bool `json:"child_unpriced,omitempty"`
 	// TotalCostUSD は CostUSD + ChildCostUSD。レポートはこちらを使う。
 	TotalCostUSD float64 `json:"total_cost_usd"`
 }
@@ -194,6 +201,9 @@ type Proposal struct {
 	Title    string `json:"title"`
 	Detail   string `json:"detail"`
 	Category string `json:"category"`
+	// Evidence はこの提案で減らせたはずのロス（どのセッションで何が無駄になったか）。
+	// ロスを挙げさせることで、一般論だけの提案を出させないための欄。過去の rollup には無い。
+	Evidence string `json:"evidence,omitempty"`
 }
 
 // ActionVerdict は過去の改善提案がその後どうなったかの判定。
