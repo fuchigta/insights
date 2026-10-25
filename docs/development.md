@@ -51,6 +51,7 @@
 | 圧縮 | なし | 7 日ほどで `.jsonl.zst`（zstd）。両方読む |
 | 保持 | 約30日で自動削除 | 自動削除なし |
 | サブエージェント | `<uuid>/subagents/agent-*.jsonl`（親はパスから復元） | 同じ置き場に並ぶ。親は `session_meta` の `parent_thread_id` |
+| 人間の発話の判定 | `isMeta` と本文の印（system-reminder など） | `content_item_metadata` の provenance が `user` か。記録の無い古いロールアウトは本文の印で判定する |
 | モデル名 | アシスタント発話ごとに入る | 発話には無い。`turn_context` 行を追いかける |
 | トークン使用量 | アシスタント発話の `usage`（`message.id` で重複排除） | 別行の `token_usage_record`。直近のアシスタント発話に対応付ける |
 | 入力トークンの意味 | キャッシュ読み取りを含まない | **含む**（取り込み時に差し引く） |

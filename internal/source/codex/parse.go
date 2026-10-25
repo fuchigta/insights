@@ -123,6 +123,20 @@ type responseItem struct {
 
 	// local_shell_call / web_search_call
 	Action json.RawMessage `json:"action"`
+
+	// 新しめの Codex が message に添える内部メタデータ。content の各要素を誰が
+	// 書いたか（provenance）がここに入る。
+	Metadata *messageMetadata `json:"internal_chat_message_metadata_passthrough"`
+}
+
+// messageMetadata は InternalChatMessageMetadataPassthrough のうち使う項目だけ。
+// content_item_metadata は content と同じ並びで、要素ごとの出どころを持つ。
+type messageMetadata struct {
+	ContentItemMetadata []struct {
+		Provenance struct {
+			Type string `json:"type"`
+		} `json:"provenance"`
+	} `json:"content_item_metadata"`
 }
 
 // contentPart は content / summary の配列要素。text を持つ型だけを見る
@@ -373,7 +387,9 @@ func applySessionMeta(sess *model.Session, meta sessionMeta) {
 // Codex の SessionSource は「文字列」にも「1 キーのオブジェクト」にもなる
 // （Cli/VSCode/Exec/Mcp/Unknown は "cli" のような文字列、Custom/Internal/SubAgent は
 // {"custom":"atlas"} や {"subagent":{"thread_spawn":{...}}} のようなオブジェクト）。
-// 戻り値の entrypoint は Codex 側の Display 実装と同じ表記に揃える。
+// 戻り値の entrypoint は Codex 側の Display 実装と同じ表記に揃える。ただし
+// サブエージェントは SubAgentSource::kind() に揃える（Display は thread_spawn に
+// 親 ID と深さを埋め込むため、entrypoint の除外設定で指定できなくなる）。
 func decodeSessionSource(raw json.RawMessage) (entrypoint string, nonRootAgent bool, parentThreadID string) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
@@ -413,7 +429,9 @@ func decodeSessionSource(raw json.RawMessage) (entrypoint string, nonRootAgent b
 }
 
 // decodeSubAgentSource は SubAgentSource（"review" のような文字列、または
-// {"thread_spawn":{...}} のようなオブジェクト）から種別名と親スレッド ID を取り出す。
+// {"thread_spawn":{...}} / {"other":"guardian"} のようなオブジェクト）から
+// 種別名と親スレッド ID を取り出す。Other は中身の文字列が種別名になる
+// （ガーディアンなら "guardian"。"other" のままでは何のスレッドか区別できない）。
 func decodeSubAgentSource(raw json.RawMessage) (name, parentThreadID string) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
@@ -432,12 +450,18 @@ func decodeSubAgentSource(raw json.RawMessage) (name, parentThreadID string) {
 		return "", ""
 	}
 	for key, val := range obj {
-		if key == "thread_spawn" {
+		switch key {
+		case "thread_spawn":
 			var spawn struct {
 				ParentThreadID string `json:"parent_thread_id"`
 			}
 			if err := json.Unmarshal(val, &spawn); err == nil {
 				return key, spawn.ParentThreadID
+			}
+		case "other":
+			var s string
+			if err := json.Unmarshal(val, &s); err == nil && s != "" {
+				return s, ""
 			}
 		}
 		return key, ""
@@ -570,7 +594,7 @@ func convertMessageItem(item responseItem, ts time.Time, curModel, curEffort str
 			Timestamp: ts,
 			Role:      model.RoleUser,
 			Text:      text,
-			IsMeta:    isMetaText(text),
+			IsMeta:    isMetaUserMessage(item, text),
 		}}
 	default:
 		// developer / system。Codex が組み立てて差し込む指示（AGENTS.md の内容、
@@ -674,6 +698,33 @@ var metaTextMarkers = []string{
 	// 以下は古いロールアウト向け。現在の Codex は developer ロールで差し込む。
 	"<environment_context>",
 	"<user_instructions>",
+}
+
+// isMetaUserMessage は user ロールのメッセージが Codex の差し込みかどうかを判定する。
+//
+// 出どころ（provenance）が記録されていればそれを正とする。Codex は人間の入力を
+// "user"、AGENTS.md や環境情報などの差し込みを "agents_md" / "harness" などで区別して
+// おり、本文の先頭の印を見るより確実（印の種類は Codex の版ごとに増える）。
+// 1 要素でも "user" があれば人間の発話とみなす。provenance が無い、または全要素が
+// "unknown"（記録が始まる前の履歴）のときだけ、本文の印による判定に戻す。
+func isMetaUserMessage(item responseItem, text string) bool {
+	if item.Metadata != nil {
+		known := false
+		for _, m := range item.Metadata.ContentItemMetadata {
+			switch m.Provenance.Type {
+			case "user":
+				return false
+			case "", "unknown", "user_configured":
+				// user_configured は unknown の旧名（Codex 側で alias されている）。
+			default:
+				known = true
+			}
+		}
+		if known {
+			return true
+		}
+	}
+	return isMetaText(text)
 }
 
 // isMetaText は user ロールの本文が Codex の差し込みかどうかを判定する。
