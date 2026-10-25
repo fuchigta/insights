@@ -6,7 +6,7 @@
 
 # CI（.github/workflows/ci.yml の SPOTTER_VERSION）と合わせておく。上げるときは
 # 両方を書き換えること。
-required_version: v0.2.0
+required_version: v0.13.0
 
 checks:
   doc-sync:
