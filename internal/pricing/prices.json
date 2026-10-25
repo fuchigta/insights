@@ -1,8 +1,24 @@
 {
-  "_note": "USD / 1M トークン。claude-* は Anthropic の公開 API レート、gpt-* は OpenAI の公開 API レート（どちらも 2026-09-01 時点）。Anthropic 側は cache write 5m = input x1.25、cache write 1h = input x2、cache read = input x0.1 という標準倍率から算出している。OpenAI 側はキャッシュ書き込みを別建てで課金しない（書き込み分は通常の入力として課金される）ため cache_write_* は 0 で、cache_read には公開されている cached input のレートを入れている。gpt-*-pro はキャッシュ入力の提供が無いため cache_read も 0。gpt-5.3-codex の fast mode のように単価が倍になる実行形態は区別できないので、その場合は過小評価になる。契約単価が異なる場合は config の pricing.overrides で上書きする。non_billable は課金対象外の擬似モデル名で、未知モデルとしては扱わない。",
-  "version": "2026-09-01",
-  "non_billable": ["<synthetic>"],
+  "_note": "USD / 1M トークン。claude-* は Anthropic の公開 API レート、gpt-* は OpenAI の公開 API レート（どちらも 2026-10-25 時点）。Anthropic 側のキャッシュ書き込みは cache write 5m = input x1.25、cache write 1h = input x2 の標準倍率。cache read は世代によって倍率が違い、標準は input x0.1、Opus/Sonnet 5.5 は x0.05、Fable/Mythos 5.1 は x0.025（公開されている値をそのまま入れている）。OpenAI 側はキャッシュ書き込みを別建てで課金しない（書き込み分は通常の入力として課金される）ため cache_write_* は 0 で、cache_read には公開されている cached input のレートを入れている。gpt-*-pro はキャッシュ入力の提供が無いため cache_read も 0。長文の階層価格（claude-haiku-5-5 はプロンプト 100K トークン超で約 5 倍、gpt-5.4 以降の OpenAI モデルは入力 272K トークン超で入力 2 倍・出力 1.5 倍）は扱っておらず短文側の単価を入れているため、長い文脈では過小評価になる。gpt-5.3-codex の fast mode のように単価が倍になる実行形態も区別できないので、その場合も過小評価になる。codex-auto-review（Codex の自動承認レビュー）は API 単価が公開されていないため載せていない。契約単価が異なる場合は config の pricing.overrides で上書きする。non_billable は課金対象外の擬似モデル名で、未知モデルとしては扱わない。",
+  "version": "2026-10-25",
+  "non_billable": [
+    "<synthetic>"
+  ],
   "models": {
+    "claude-fable-5-1": {
+      "input": 10.0,
+      "output": 50.0,
+      "cache_write_5m": 12.5,
+      "cache_write_1h": 20.0,
+      "cache_read": 0.25
+    },
+    "claude-mythos-5-1": {
+      "input": 10.0,
+      "output": 50.0,
+      "cache_write_5m": 12.5,
+      "cache_write_1h": 20.0,
+      "cache_read": 0.25
+    },
     "claude-fable-5": {
       "input": 10.0,
       "output": 50.0,
@@ -16,6 +32,13 @@
       "cache_write_5m": 12.5,
       "cache_write_1h": 20.0,
       "cache_read": 1.0
+    },
+    "claude-opus-5-5": {
+      "input": 4.0,
+      "output": 20.0,
+      "cache_write_5m": 5.0,
+      "cache_write_1h": 8.0,
+      "cache_read": 0.2
     },
     "claude-opus-5": {
       "input": 5.0,
@@ -52,12 +75,19 @@
       "cache_write_1h": 10.0,
       "cache_read": 0.5
     },
+    "claude-sonnet-5-5": {
+      "input": 2.0,
+      "output": 10.0,
+      "cache_write_5m": 2.5,
+      "cache_write_1h": 4.0,
+      "cache_read": 0.1
+    },
     "claude-sonnet-5": {
-      "input": 3.0,
-      "output": 15.0,
-      "cache_write_5m": 3.75,
-      "cache_write_1h": 6.0,
-      "cache_read": 0.3
+      "input": 2.0,
+      "output": 10.0,
+      "cache_write_5m": 2.5,
+      "cache_write_1h": 4.0,
+      "cache_read": 0.2
     },
     "claude-sonnet-4-6": {
       "input": 3.0,
@@ -73,12 +103,47 @@
       "cache_write_1h": 6.0,
       "cache_read": 0.3
     },
+    "claude-haiku-5-5": {
+      "input": 0.1,
+      "output": 0.5,
+      "cache_write_5m": 0.125,
+      "cache_write_1h": 0.2,
+      "cache_read": 0.01
+    },
     "claude-haiku-4-5": {
       "input": 1.0,
       "output": 5.0,
       "cache_write_5m": 1.25,
       "cache_write_1h": 2.0,
       "cache_read": 0.1
+    },
+    "gpt-6-astra": {
+      "input": 10.0,
+      "output": 50.0,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0,
+      "cache_read": 1.0
+    },
+    "gpt-6.1-sol": {
+      "input": 2.0,
+      "output": 10.0,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0,
+      "cache_read": 0.1
+    },
+    "gpt-6-sol": {
+      "input": 2.0,
+      "output": 10.0,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0,
+      "cache_read": 0.2
+    },
+    "gpt-6-luna": {
+      "input": 0.1,
+      "output": 0.5,
+      "cache_write_5m": 0.0,
+      "cache_write_1h": 0.0,
+      "cache_read": 0.01
     },
     "gpt-5.6-sol": {
       "input": 4.0,

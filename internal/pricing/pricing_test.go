@@ -22,9 +22,12 @@ func TestLoad_EmbeddedTableIsPriced(t *testing.T) {
 	}
 
 	wantRates := map[string]Rate{
-		"claude-opus-5":    {Input: 5.0, Output: 25.0, CacheWrite5m: 6.25, CacheWrite1h: 10.0, CacheRead: 0.5},
-		"claude-sonnet-5":  {Input: 3.0, Output: 15.0, CacheWrite5m: 3.75, CacheWrite1h: 6.0, CacheRead: 0.3},
+		"claude-opus-5": {Input: 5.0, Output: 25.0, CacheWrite5m: 6.25, CacheWrite1h: 10.0, CacheRead: 0.5},
+		// Sonnet 5 は予定されていた 3/15 への値上げが取りやめになり、2/10 が標準になった。
+		"claude-sonnet-5":  {Input: 2.0, Output: 10.0, CacheWrite5m: 2.5, CacheWrite1h: 4.0, CacheRead: 0.2},
 		"claude-haiku-4-5": {Input: 1.0, Output: 5.0, CacheWrite5m: 1.25, CacheWrite1h: 2.0, CacheRead: 0.1},
+		// 5.5 世代は cache read の倍率が x0.05 で、標準の x0.1 と違う。
+		"claude-opus-5-5": {Input: 4.0, Output: 20.0, CacheWrite5m: 5.0, CacheWrite1h: 8.0, CacheRead: 0.2},
 	}
 	for name, want := range wantRates {
 		r, ok := tbl.rates[name]
@@ -73,6 +76,12 @@ func TestRate_TableDriven(t *testing.T) {
 		// "gpt-5.7" は別世代なので未知として警告に出す必要がある。
 		{"世代違いは前方一致させない", "gpt-5.7", false, 0},
 		{"派生（- 区切り）は前方一致させる", "gpt-5.5-preview", true, 5},
+		// Claude は世代を "-" で区切る。"claude-opus-5" の単価で "claude-opus-5-6" を
+		// 黙って計算しないこと（実際に 5-5 が 5 の単価で過大に計上されていた）。
+		{"Claude の世代違い（- 区切りの数字）は前方一致させない", "claude-opus-5-6", false, 0},
+		{"Claude の新世代は個別の単価を引く", "claude-opus-5-5", true, 4},
+		{"Claude の日付付きは剥がして引く", "claude-haiku-5-5-20261007", true, 0.1},
+		{"OpenAI の新世代", "gpt-6-luna", true, 0.1},
 	}
 
 	for _, tt := range tests {
