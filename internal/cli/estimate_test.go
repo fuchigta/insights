@@ -51,12 +51,12 @@ func TestPercentileOf(t *testing.T) {
 func TestEvalCostEstimator_FallsBackWithoutSamples(t *testing.T) {
 	db := newTempDB(t)
 
-	e := newEvalCostEstimator(db, "claude-sonnet-5", judgeBackendClaudeCLI)
+	e := newEvalCostEstimator(db, nil, "claude-sonnet-5", judgeBackendClaudeCLI)
 	got, fromActual := e.perSession(10)
 	if fromActual {
 		t.Error("実績が無いのに実績由来と報告された")
 	}
-	if want := estimateCostPerSession("claude-sonnet-5"); got != want {
+	if want := estimateCostPerSession(nil, "claude-sonnet-5"); got != want {
 		t.Errorf("perSession() = %v, want %v（既定値）", got, want)
 	}
 }
@@ -83,7 +83,7 @@ func TestEvalCostEstimator_UsesActuals(t *testing.T) {
 		}
 	}
 
-	e := newEvalCostEstimator(db, "claude-sonnet-5", judgeBackendClaudeCLI)
+	e := newEvalCostEstimator(db, nil, "claude-sonnet-5", judgeBackendClaudeCLI)
 	got, fromActual := e.perSession(2)
 	if !fromActual {
 		t.Fatal("実績が 6 件あるのに既定値へ落ちた")
@@ -94,7 +94,7 @@ func TestEvalCostEstimator_UsesActuals(t *testing.T) {
 	}
 
 	// 別モデルの実績は混ざらない（単価が違うので混ぜると見積もりが壊れる）。
-	other := newEvalCostEstimator(db, "claude-haiku-4-5", judgeBackendClaudeCLI)
+	other := newEvalCostEstimator(db, nil, "claude-haiku-4-5", judgeBackendClaudeCLI)
 	if _, fromActual := other.perSession(2); fromActual {
 		t.Error("別モデルの実績が使われた")
 	}
@@ -142,7 +142,7 @@ func TestEvalCostEstimator_Basis(t *testing.T) {
 func TestEvalCostEstimator_BackendWithoutCost(t *testing.T) {
 	db := newTempDB(t)
 
-	e := newEvalCostEstimator(db, "gpt-5.5", judgeBackendCodexCLI)
+	e := newEvalCostEstimator(db, nil, "gpt-5.5", judgeBackendCodexCLI)
 	got, fromActual := e.perSession(10)
 	if fromActual {
 		t.Error("実費を報告しないバックエンドで実績由来と報告された")

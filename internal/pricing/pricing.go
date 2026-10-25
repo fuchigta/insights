@@ -103,6 +103,82 @@ func stripDateSuffix(modelName string) string {
 	return dateSuffixRE.ReplaceAllString(modelName, "")
 }
 
+// bracketSuffixRE は "claude-opus-4-6[1m]" のような、Claude Code がモデル指定に付ける
+// 角括弧の接尾辞（文脈長の指定など）にマッチする。
+var bracketSuffixRE = regexp.MustCompile(`\[[^\]]*\]$`)
+
+// familyVersionRE は "claude-<系列>-" に続く世代番号だけの残り（"5"、"5-5"、"4-6" など）にマッチする。
+// 日付付き（8 桁）やサイズ違いの派生は「その系列の最新」の候補にしない。
+var familyVersionRE = regexp.MustCompile(`^\d{1,2}(-\d{1,2})*$`)
+
+// ResolveAlias は Claude Code のモデルエイリアス（"haiku" / "sonnet" / "opus" など）を、
+// 単価表にあるその系列の最新世代のモデル名に解決する。"[1m]" のような接尾辞は外す。
+// エイリアスでなければ（単価表で引ける名前なら）接尾辞を外した名前をそのまま返す。
+// 解決できなければ ok=false。
+//
+// エイリアスの指す先は Claude Code 側の更新で変わるため、対応表を持つと古くなる。
+// 単価表（LiteLLM から週 1 回同期している）の中で世代番号が最大のものを採ることで、
+// 単価表の更新に合わせて追従させる。
+func (t *Table) ResolveAlias(name string) (string, bool) {
+	name = strings.TrimSpace(bracketSuffixRE.ReplaceAllString(strings.TrimSpace(name), ""))
+	if name == "" {
+		return "", false
+	}
+	if _, ok := t.Rate(name); ok {
+		return name, true
+	}
+	if strings.Contains(name, "-") {
+		return "", false
+	}
+
+	prefix := "claude-" + strings.ToLower(name) + "-"
+	var best string
+	var bestVer []int
+	for registered := range t.rates {
+		rest, ok := strings.CutPrefix(registered, prefix)
+		if !ok || !familyVersionRE.MatchString(rest) {
+			continue
+		}
+		ver := parseVersion(rest)
+		if best == "" || compareVersion(ver, bestVer) > 0 {
+			best, bestVer = registered, ver
+		}
+	}
+	return best, best != ""
+}
+
+// parseVersion は "5-5" のような世代番号を数値の列にする（familyVersionRE に一致済みの前提）。
+func parseVersion(s string) []int {
+	parts := strings.Split(s, "-")
+	out := make([]int, len(parts))
+	for i, p := range parts {
+		for _, c := range p {
+			out[i] = out[i]*10 + int(c-'0')
+		}
+	}
+	return out
+}
+
+// compareVersion は世代番号の列を比べる。"5" と "5-0" は同じ、"5-5" は "5" より新しい。
+func compareVersion(a, b []int) int {
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var x, y int
+		if i < len(a) {
+			x = a[i]
+		}
+		if i < len(b) {
+			y = b[i]
+		}
+		if x != y {
+			if x > y {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
+}
+
 // Rate はモデル名から単価を引く。
 //
 // 解決順序:

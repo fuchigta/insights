@@ -10,8 +10,20 @@ import (
 	"math"
 	"sort"
 
+	"github.com/fuchigta/insights/internal/config"
+	"github.com/fuchigta/insights/internal/pricing"
 	"github.com/fuchigta/insights/internal/store"
 )
+
+// loadEstimatePrices は見積もりの既定値の換算に使う単価表を読む（pricing.overrides 込み）。
+// 読めなくても見積もりは安全側の固定値で成立するため、エラーにせず nil を返す。
+func loadEstimatePrices(cfg *config.Config) *pricing.Table {
+	t, err := pricing.Load(convertPricingOverrides(cfg.Pricing.Overrides))
+	if err != nil {
+		return nil
+	}
+	return t
+}
 
 const (
 	// evalCostSampleLimit は見積もりに使う実績の件数（新しい順）。
@@ -53,7 +65,8 @@ func sessionSizeBucket(messages int) string {
 
 // evalCostEstimator は評価コストの実績を区分ごとに保持し、見積もりを返す。
 type evalCostEstimator struct {
-	model string
+	model  string
+	prices *pricing.Table // 既定値の換算用。nil なら安全側の固定値
 	// reportsCost はバックエンドが実費を報告するか（internal/cli/deps.go の
 	// judgeReportsCost）。報告しないバックエンドでは実績も既定値も意味を持たないので、
 	// 金額を作らずに「分からない」と言う。
@@ -65,9 +78,10 @@ type evalCostEstimator struct {
 // newEvalCostEstimator は DB の実績から見積もり器を作る。実績が引けなくても
 // 見積もり自体は既定値で成立するため、エラーは返さず空の見積もり器を返す
 // （見積もりのために評価を止めるのは本末転倒なので）。
-func newEvalCostEstimator(db *store.DB, model, backend string) *evalCostEstimator {
+func newEvalCostEstimator(db *store.DB, prices *pricing.Table, model, backend string) *evalCostEstimator {
 	e := &evalCostEstimator{
 		model:       model,
+		prices:      prices,
 		reportsCost: judgeReportsCost(backend),
 		byBucket:    map[string][]float64{},
 	}
@@ -105,7 +119,7 @@ func (e *evalCostEstimator) perSession(messages int) (float64, bool) {
 	if v, ok := percentileOf(e.all, evalCostPercentile); ok {
 		return v, true
 	}
-	return estimateCostPerSession(e.model), false
+	return estimateCostPerSession(e.prices, e.model), false
 }
 
 // estimateTargets は評価対象すべての見積もり合計と、そのうち実績で見積もれた件数を返す。
