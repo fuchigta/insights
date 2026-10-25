@@ -155,6 +155,12 @@ CI で落ちたときの直し方は検査によって違う。`doc sync` は PR
 `.spotter.yml` の `required_version` で参照するリリースバージョンを固定している
 （自動追従にしていない。spotter 側のリリースで insights の CI が意図せず影響を受けないため）。
 
+spotter に同梱のスキル（`spotter-docs` / `spotter-refactor` / `spotter-triage`）を、Claude Code 用は
+`.claude/skills/`、Codex 用は `.agents/skills/` に入れてある。検査に落ちたときの対処は `spotter-triage`、
+`.spotter.yml` の見直しは `spotter-refactor` に沿って進める。spotter のバージョンを上げたら
+`spotter skills install all --only spotter-docs,spotter-refactor,spotter-triage` で入れ直し、
+`spotter skills status` が「最新」になっていることを確かめてから一緒にコミットする。
+
 ## 改行コード
 
 `.gitattributes` で作業ツリーを LF に統一している。これを外すと、埋め込みアセットとのバイト比較
