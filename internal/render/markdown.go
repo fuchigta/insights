@@ -468,6 +468,10 @@ func writeProposals(b *strings.Builder, proposals []rollup.Proposal) {
 			fmt.Fprintf(b, ": %s", detail)
 		}
 		b.WriteString("\n")
+		// 根拠のロスを添える。提案を採るか落とすかを、読み手がその場で判断できるようにする。
+		if ev := strings.TrimSpace(p.Evidence); ev != "" {
+			fmt.Fprintf(b, "   - 根拠: %s\n", ev)
+		}
 	}
 	b.WriteString("\n")
 }
