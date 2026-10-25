@@ -1,107 +1,37 @@
 {
-  "_note": "USD / 1M トークン。claude-* は Anthropic の公開 API レート、gpt-* は OpenAI の公開 API レート（どちらも 2026-10-25 時点）。Anthropic 側のキャッシュ書き込みは cache write 5m = input x1.25、cache write 1h = input x2 の標準倍率。cache read は世代によって倍率が違い、標準は input x0.1、Opus/Sonnet 5.5 は x0.05、Fable/Mythos 5.1 は x0.025（公開されている値をそのまま入れている）。OpenAI 側はキャッシュ書き込みを別建てで課金しない（書き込み分は通常の入力として課金される）ため cache_write_* は 0 で、cache_read には公開されている cached input のレートを入れている。gpt-*-pro はキャッシュ入力の提供が無いため cache_read も 0。長文の階層価格（claude-haiku-5-5 はプロンプト 100K トークン超で約 5 倍、gpt-5.4 以降の OpenAI モデルは入力 272K トークン超で入力 2 倍・出力 1.5 倍）は扱っておらず短文側の単価を入れているため、長い文脈では過小評価になる。gpt-5.3-codex の fast mode のように単価が倍になる実行形態も区別できないので、その場合も過小評価になる。codex-auto-review（Codex の自動承認レビュー）は API 単価が公開されていないため載せていない。契約単価が異なる場合は config の pricing.overrides で上書きする。non_billable は課金対象外の擬似モデル名で、未知モデルとしては扱わない。",
+  "_note": "USD / 1M トークン。LiteLLM（BerriAI/litellm の model_prices_and_context_window.json）から internal/pricing/prices_manual.json を重ねて cmd/pricesync が生成したもの。手で編集せず、上書きしたいモデルは prices_manual.json を直すこと（週 1 回のワークフロー prices-sync.yml が PR で更新する）。claude-* は Anthropic、gpt-* は OpenAI の API レート。Anthropic 側のキャッシュ書き込みは LiteLLM の値で、無ければ 5 分は input x1.25、1 時間は input x2 の標準倍率で補う。OpenAI 側はキャッシュ書き込みを別建てで課金しない（Codex の input_tokens は書き込み分を含む合計で、insights は通常の入力として課金する。入れると二重計上になる）ため cache_write_* は 0 で、cache_read には cached input のレートが入る。gpt-*-pro はキャッシュ入力の提供が無いため cache_read も 0。長文の階層価格（プロンプトが一定長を超えると単価が上がるもの）は扱わず短文側の単価を入れているため、長い文脈では過小評価になる。fast mode のように単価が倍になる実行形態も区別できないので、その場合も過小評価になる。契約単価が異なる場合は config の pricing.overrides で上書きする。non_billable は課金対象外の擬似モデル名で、未知モデルとしては扱わない。",
   "version": "2026-10-25",
   "non_billable": [
     "<synthetic>"
   ],
   "models": {
-    "claude-fable-5-1": {
-      "input": 10.0,
-      "output": 50.0,
-      "cache_write_5m": 12.5,
-      "cache_write_1h": 20.0,
-      "cache_read": 0.25
-    },
-    "claude-mythos-5-1": {
-      "input": 10.0,
-      "output": 50.0,
-      "cache_write_5m": 12.5,
-      "cache_write_1h": 20.0,
-      "cache_read": 0.25
-    },
     "claude-fable-5": {
-      "input": 10.0,
-      "output": 50.0,
+      "input": 10,
+      "output": 50,
       "cache_write_5m": 12.5,
-      "cache_write_1h": 20.0,
-      "cache_read": 1.0
+      "cache_write_1h": 20,
+      "cache_read": 1
     },
-    "claude-mythos-5": {
-      "input": 10.0,
-      "output": 50.0,
+    "claude-fable-5-1": {
+      "input": 10,
+      "output": 50,
       "cache_write_5m": 12.5,
-      "cache_write_1h": 20.0,
-      "cache_read": 1.0
+      "cache_write_1h": 20,
+      "cache_read": 0.25
     },
-    "claude-opus-5-5": {
-      "input": 4.0,
-      "output": 20.0,
-      "cache_write_5m": 5.0,
-      "cache_write_1h": 8.0,
-      "cache_read": 0.2
-    },
-    "claude-opus-5": {
-      "input": 5.0,
-      "output": 25.0,
-      "cache_write_5m": 6.25,
-      "cache_write_1h": 10.0,
-      "cache_read": 0.5
-    },
-    "claude-opus-4-8": {
-      "input": 5.0,
-      "output": 25.0,
-      "cache_write_5m": 6.25,
-      "cache_write_1h": 10.0,
-      "cache_read": 0.5
-    },
-    "claude-opus-4-7": {
-      "input": 5.0,
-      "output": 25.0,
-      "cache_write_5m": 6.25,
-      "cache_write_1h": 10.0,
-      "cache_read": 0.5
-    },
-    "claude-opus-4-6": {
-      "input": 5.0,
-      "output": 25.0,
-      "cache_write_5m": 6.25,
-      "cache_write_1h": 10.0,
-      "cache_read": 0.5
-    },
-    "claude-opus-4-5": {
-      "input": 5.0,
-      "output": 25.0,
-      "cache_write_5m": 6.25,
-      "cache_write_1h": 10.0,
-      "cache_read": 0.5
-    },
-    "claude-sonnet-5-5": {
-      "input": 2.0,
-      "output": 10.0,
-      "cache_write_5m": 2.5,
-      "cache_write_1h": 4.0,
+    "claude-haiku-4-5": {
+      "input": 1,
+      "output": 5,
+      "cache_write_5m": 1.25,
+      "cache_write_1h": 2,
       "cache_read": 0.1
     },
-    "claude-sonnet-5": {
-      "input": 2.0,
-      "output": 10.0,
-      "cache_write_5m": 2.5,
-      "cache_write_1h": 4.0,
-      "cache_read": 0.2
-    },
-    "claude-sonnet-4-6": {
-      "input": 3.0,
-      "output": 15.0,
-      "cache_write_5m": 3.75,
-      "cache_write_1h": 6.0,
-      "cache_read": 0.3
-    },
-    "claude-sonnet-4-5": {
-      "input": 3.0,
-      "output": 15.0,
-      "cache_write_5m": 3.75,
-      "cache_write_1h": 6.0,
-      "cache_read": 0.3
+    "claude-haiku-4-5-20251001": {
+      "input": 1,
+      "output": 5,
+      "cache_write_5m": 1.25,
+      "cache_write_1h": 2,
+      "cache_read": 0.1
     },
     "claude-haiku-5-5": {
       "input": 0.1,
@@ -110,159 +40,747 @@
       "cache_write_1h": 0.2,
       "cache_read": 0.01
     },
-    "claude-haiku-4-5": {
-      "input": 1.0,
-      "output": 5.0,
-      "cache_write_5m": 1.25,
-      "cache_write_1h": 2.0,
-      "cache_read": 0.1
+    "claude-mythos-5": {
+      "input": 10,
+      "output": 50,
+      "cache_write_5m": 12.5,
+      "cache_write_1h": 20,
+      "cache_read": 1
     },
-    "gpt-6-astra": {
-      "input": 10.0,
-      "output": 50.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 1.0
-    },
-    "gpt-6.1-sol": {
-      "input": 2.0,
-      "output": 10.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.1
-    },
-    "gpt-6-sol": {
-      "input": 2.0,
-      "output": 10.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.2
-    },
-    "gpt-6-luna": {
-      "input": 0.1,
-      "output": 0.5,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.01
-    },
-    "gpt-5.6-sol": {
-      "input": 4.0,
-      "output": 20.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.4
-    },
-    "gpt-5.6-terra": {
-      "input": 2.0,
-      "output": 12.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.2
-    },
-    "gpt-5.6-luna": {
-      "input": 0.2,
-      "output": 1.2,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.02
-    },
-    "gpt-5.5": {
-      "input": 5.0,
-      "output": 30.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.5
-    },
-    "gpt-5.5-pro": {
-      "input": 30.0,
-      "output": 180.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.0
-    },
-    "gpt-5.4": {
-      "input": 2.5,
-      "output": 15.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
+    "claude-mythos-5-1": {
+      "input": 10,
+      "output": 50,
+      "cache_write_5m": 12.5,
+      "cache_write_1h": 20,
       "cache_read": 0.25
     },
-    "gpt-5.4-mini": {
-      "input": 0.75,
-      "output": 4.5,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
+    "claude-mythos-preview": {
+      "input": 10,
+      "output": 50,
+      "cache_write_5m": 12.5,
+      "cache_write_1h": 20,
+      "cache_read": 1
+    },
+    "claude-opus-4-5": {
+      "input": 5,
+      "output": 25,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10,
+      "cache_read": 0.5
+    },
+    "claude-opus-4-5-20251101": {
+      "input": 5,
+      "output": 25,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10,
+      "cache_read": 0.5
+    },
+    "claude-opus-4-6": {
+      "input": 5,
+      "output": 25,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10,
+      "cache_read": 0.5
+    },
+    "claude-opus-4-6-20260205": {
+      "input": 5,
+      "output": 25,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10,
+      "cache_read": 0.5
+    },
+    "claude-opus-4-7": {
+      "input": 5,
+      "output": 25,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10,
+      "cache_read": 0.5
+    },
+    "claude-opus-4-7-20260416": {
+      "input": 5,
+      "output": 25,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10,
+      "cache_read": 0.5
+    },
+    "claude-opus-4-8": {
+      "input": 5,
+      "output": 25,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10,
+      "cache_read": 0.5
+    },
+    "claude-opus-5": {
+      "input": 5,
+      "output": 25,
+      "cache_write_5m": 6.25,
+      "cache_write_1h": 10,
+      "cache_read": 0.5
+    },
+    "claude-opus-5-5": {
+      "input": 4,
+      "output": 20,
+      "cache_write_5m": 5,
+      "cache_write_1h": 8,
+      "cache_read": 0.2
+    },
+    "claude-sonnet-4-5": {
+      "input": 3,
+      "output": 15,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6,
+      "cache_read": 0.3
+    },
+    "claude-sonnet-4-5-20250929": {
+      "input": 3,
+      "output": 15,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6,
+      "cache_read": 0.3
+    },
+    "claude-sonnet-4-6": {
+      "input": 3,
+      "output": 15,
+      "cache_write_5m": 3.75,
+      "cache_write_1h": 6,
+      "cache_read": 0.3
+    },
+    "claude-sonnet-5": {
+      "input": 2,
+      "output": 10,
+      "cache_write_5m": 2.5,
+      "cache_write_1h": 4,
+      "cache_read": 0.2
+    },
+    "claude-sonnet-5-5": {
+      "input": 2,
+      "output": 10,
+      "cache_write_5m": 2.5,
+      "cache_write_1h": 4,
+      "cache_read": 0.1
+    },
+    "codex-auto-review": {
+      "input": 0,
+      "output": 0,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-3.5-turbo": {
+      "input": 0.5,
+      "output": 1.5,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-3.5-turbo-0125": {
+      "input": 0.5,
+      "output": 1.5,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-3.5-turbo-1106": {
+      "input": 1,
+      "output": 2,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-3.5-turbo-16k": {
+      "input": 3,
+      "output": 4,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-4": {
+      "input": 30,
+      "output": 60,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-4-0613": {
+      "input": 30,
+      "output": 60,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-4-1106-preview": {
+      "input": 10,
+      "output": 30,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-4-turbo": {
+      "input": 10,
+      "output": 30,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-4-turbo-2024-04-09": {
+      "input": 10,
+      "output": 30,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-4.1": {
+      "input": 2,
+      "output": 8,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.5
+    },
+    "gpt-4.1-2025-04-14": {
+      "input": 2,
+      "output": 8,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.5
+    },
+    "gpt-4.1-mini": {
+      "input": 0.4,
+      "output": 1.6,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.1
+    },
+    "gpt-4.1-mini-2025-04-14": {
+      "input": 0.4,
+      "output": 1.6,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.1
+    },
+    "gpt-4.1-nano": {
+      "input": 0.1,
+      "output": 0.4,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.025
+    },
+    "gpt-4.1-nano-2025-04-14": {
+      "input": 0.1,
+      "output": 0.4,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.025
+    },
+    "gpt-4o": {
+      "input": 2.5,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1.25
+    },
+    "gpt-4o-2024-05-13": {
+      "input": 5,
+      "output": 15,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-4o-2024-08-06": {
+      "input": 2.5,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1.25
+    },
+    "gpt-4o-2024-11-20": {
+      "input": 2.5,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1.25
+    },
+    "gpt-4o-audio-preview-2024-12-17": {
+      "input": 2.5,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-4o-audio-preview-2025-06-03": {
+      "input": 2.5,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-4o-mini": {
+      "input": 0.15,
+      "output": 0.6,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
       "cache_read": 0.075
     },
-    "gpt-5.4-nano": {
-      "input": 0.2,
-      "output": 1.25,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.02
+    "gpt-4o-mini-2024-07-18": {
+      "input": 0.15,
+      "output": 0.6,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.075
     },
-    "gpt-5.4-pro": {
-      "input": 30.0,
-      "output": 180.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.0
+    "gpt-4o-mini-audio-preview-2024-12-17": {
+      "input": 0.15,
+      "output": 0.6,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
     },
-    "gpt-5.3-codex": {
-      "input": 1.75,
-      "output": 14.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.175
+    "gpt-4o-mini-search-preview": {
+      "input": 0.15,
+      "output": 0.6,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.075
     },
-    "gpt-5.2": {
-      "input": 1.75,
-      "output": 14.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.175
+    "gpt-4o-mini-search-preview-2025-03-11": {
+      "input": 0.15,
+      "output": 0.6,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.075
     },
-    "gpt-5.2-pro": {
-      "input": 21.0,
-      "output": 168.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.0
+    "gpt-4o-search-preview": {
+      "input": 2.5,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1.25
     },
-    "gpt-5.1": {
-      "input": 1.25,
-      "output": 10.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.125
+    "gpt-4o-search-preview-2025-03-11": {
+      "input": 2.5,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1.25
     },
     "gpt-5": {
       "input": 1.25,
-      "output": 10.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.125
+    },
+    "gpt-5-2025-08-07": {
+      "input": 1.25,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.125
+    },
+    "gpt-5-chat": {
+      "input": 1.25,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.125
+    },
+    "gpt-5-chat-latest": {
+      "input": 1.25,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.125
+    },
+    "gpt-5-codex": {
+      "input": 1.25,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
       "cache_read": 0.125
     },
     "gpt-5-mini": {
       "input": 0.25,
-      "output": 2.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
+      "output": 2,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.025
+    },
+    "gpt-5-mini-2025-08-07": {
+      "input": 0.25,
+      "output": 2,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
       "cache_read": 0.025
     },
     "gpt-5-nano": {
       "input": 0.05,
       "output": 0.4,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.005
+    },
+    "gpt-5-nano-2025-08-07": {
+      "input": 0.05,
+      "output": 0.4,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
       "cache_read": 0.005
     },
     "gpt-5-pro": {
-      "input": 15.0,
-      "output": 120.0,
-      "cache_write_5m": 0.0,
-      "cache_write_1h": 0.0,
-      "cache_read": 0.0
+      "input": 15,
+      "output": 120,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-5-pro-2025-10-06": {
+      "input": 15,
+      "output": 120,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-5-search-api": {
+      "input": 1.25,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.125
+    },
+    "gpt-5-search-api-2025-10-14": {
+      "input": 1.25,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.125
+    },
+    "gpt-5.1": {
+      "input": 1.25,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.125
+    },
+    "gpt-5.1-2025-11-13": {
+      "input": 1.25,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.125
+    },
+    "gpt-5.1-chat-latest": {
+      "input": 1.25,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.125
+    },
+    "gpt-5.1-codex": {
+      "input": 1.25,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.125
+    },
+    "gpt-5.1-codex-max": {
+      "input": 1.25,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.125
+    },
+    "gpt-5.1-codex-mini": {
+      "input": 0.25,
+      "output": 2,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.025
+    },
+    "gpt-5.2": {
+      "input": 1.75,
+      "output": 14,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.175
+    },
+    "gpt-5.2-2025-12-11": {
+      "input": 1.75,
+      "output": 14,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.175
+    },
+    "gpt-5.2-chat-latest": {
+      "input": 1.75,
+      "output": 14,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.175
+    },
+    "gpt-5.2-codex": {
+      "input": 1.75,
+      "output": 14,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.175
+    },
+    "gpt-5.2-pro": {
+      "input": 21,
+      "output": 168,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-5.2-pro-2025-12-11": {
+      "input": 21,
+      "output": 168,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-5.3-chat-latest": {
+      "input": 1.75,
+      "output": 14,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.175
+    },
+    "gpt-5.3-codex": {
+      "input": 1.75,
+      "output": 14,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.175
+    },
+    "gpt-5.4": {
+      "input": 2.5,
+      "output": 15,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.25
+    },
+    "gpt-5.4-2026-03-05": {
+      "input": 2.5,
+      "output": 15,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.25
+    },
+    "gpt-5.4-mini": {
+      "input": 0.75,
+      "output": 4.5,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.075
+    },
+    "gpt-5.4-mini-2026-03-17": {
+      "input": 0.75,
+      "output": 4.5,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.075
+    },
+    "gpt-5.4-nano": {
+      "input": 0.2,
+      "output": 1.25,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.02
+    },
+    "gpt-5.4-nano-2026-03-17": {
+      "input": 0.2,
+      "output": 1.25,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.02
+    },
+    "gpt-5.4-pro": {
+      "input": 30,
+      "output": 180,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-5.4-pro-2026-03-05": {
+      "input": 30,
+      "output": 180,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-5.5": {
+      "input": 5,
+      "output": 30,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.5
+    },
+    "gpt-5.5-2026-04-23": {
+      "input": 5,
+      "output": 30,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.5
+    },
+    "gpt-5.5-cyber": {
+      "input": 12.5,
+      "output": 75,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1.25
+    },
+    "gpt-5.5-cyber-preview": {
+      "input": 12.5,
+      "output": 75,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1.25
+    },
+    "gpt-5.5-pro": {
+      "input": 30,
+      "output": 180,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-5.5-pro-2026-04-23": {
+      "input": 30,
+      "output": 180,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-5.6": {
+      "input": 4,
+      "output": 20,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.4
+    },
+    "gpt-5.6-cyber": {
+      "input": 12.5,
+      "output": 75,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1.25
+    },
+    "gpt-5.6-luna": {
+      "input": 0.2,
+      "output": 1.2,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.02
+    },
+    "gpt-5.6-sol": {
+      "input": 4,
+      "output": 20,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.4
+    },
+    "gpt-5.6-terra": {
+      "input": 2,
+      "output": 12,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.2
+    },
+    "gpt-6-astra": {
+      "input": 10,
+      "output": 50,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1
+    },
+    "gpt-6-luna": {
+      "input": 0.1,
+      "output": 0.5,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.01
+    },
+    "gpt-6-sol": {
+      "input": 2,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.2
+    },
+    "gpt-6.1-sol": {
+      "input": 2,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.1
+    },
+    "gpt-audio": {
+      "input": 2.5,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-audio-1.5": {
+      "input": 2.5,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-audio-2025-08-28": {
+      "input": 2.5,
+      "output": 10,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-audio-mini": {
+      "input": 0.6,
+      "output": 2.4,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-audio-mini-2025-10-06": {
+      "input": 0.6,
+      "output": 2.4,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-audio-mini-2025-12-15": {
+      "input": 0.6,
+      "output": 2.4,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0
+    },
+    "gpt-daybreak-blue-latest": {
+      "input": 4,
+      "output": 20,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.4
+    },
+    "gpt-daybreak-red-latest": {
+      "input": 12.5,
+      "output": 75,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1.25
+    },
+    "gpt-rosalind-discovery": {
+      "input": 5,
+      "output": 25,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.5
+    },
+    "gpt-rosalind-research": {
+      "input": 5,
+      "output": 25,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.5
     }
   }
 }
