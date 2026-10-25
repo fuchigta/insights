@@ -140,6 +140,10 @@ LiteLLM の価格表を取得して `internal/pricing/prices.json` を作り直�
   `prices.json` を生成します。変換ロジックは `internal/pricing/litellm` にあります
 - `go test ./internal/pricing/...` を通したうえで、差分があれば固定名のブランチ `chore/prices-sync` に
   force push し、`gh pr create` で PR を作ります（既に PR があれば本文を更新するだけ）。差分が無ければ何もしません
+- リポジトリ設定の「Allow GitHub Actions to create and approve pull requests」が無効だと PR を作れません。
+  この設定は承認の権限も一緒に開くため、既定では有効にしていません。その場合はブランチを push したうえで
+  ジョブを失敗させ、比較画面の URL をエラーと Job Summary に出すので、失敗の通知からその URL を開いて
+  PR を作成してください。PR を人が作るので、この場合は CI も通常どおり起動します
 - 人が PR の差分（特に既存モデルの単価の変化）をレビューしてから取り込みます
 - LiteLLM にも `prices_manual.json` にも無い既存モデルは、消さずに残して標準エラーに警告を出します
 
