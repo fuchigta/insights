@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -272,6 +273,73 @@ func TestParse_SubAgentSource(t *testing.T) {
 	}
 	if sess.Entrypoint != "subagent_thread_spawn" {
 		t.Errorf("Entrypoint = %q, want subagent_thread_spawn", sess.Entrypoint)
+	}
+}
+
+// TestParse_SubAgentOtherSource は、SubAgentSource::Other（ガーディアンなど）の
+// entrypoint が "subagent_other" ではなく中身の名前になることを確かめる。
+// "other" のままだと、除外設定でガーディアンだけを指定できない。
+func TestParse_SubAgentOtherSource(t *testing.T) {
+	body := `{"timestamp":"2026-10-25T05:33:07Z","type":"session_meta","payload":{"id":"child-1","session_id":"root-1","parent_thread_id":"root-1","timestamp":"2026-10-25T05:33:07Z","cwd":"/w","thread_source":"guardian_review","source":{"subagent":{"other":"guardian"}}}}
+`
+	sess := parseBody(t, body)
+
+	if sess.Entrypoint != "subagent_guardian" {
+		t.Errorf("Entrypoint = %q, want subagent_guardian", sess.Entrypoint)
+	}
+	if !sess.IsSidechain || sess.ParentSessionID != "root-1" {
+		t.Errorf("IsSidechain = %v, ParentSessionID = %q, want true, root-1", sess.IsSidechain, sess.ParentSessionID)
+	}
+}
+
+// TestParse_UserMessageProvenance は、content_item_metadata の provenance が
+// あれば本文の印よりそちらで人間の発話かを判定することを確かめる。
+func TestParse_UserMessageProvenance(t *testing.T) {
+	cases := []struct {
+		name     string
+		text     string
+		metadata string
+		wantMeta bool
+	}{
+		{
+			name:     "印の無い差し込みでも harness なら meta",
+			text:     "<some_future_context>…</some_future_context>",
+			metadata: `{"content_item_kinds":["future.context"],"content_item_metadata":[{"provenance":{"type":"harness","hook":false}}]}`,
+			wantMeta: true,
+		},
+		{
+			name:     "印と同じ書き出しでも user なら人間の発話",
+			text:     "<skill>について教えて",
+			metadata: `{"content_item_kinds":["user.text"],"content_item_metadata":[{"provenance":{"type":"user"}}]}`,
+			wantMeta: false,
+		},
+		{
+			name:     "差し込みと人間の入力が混在していれば人間の発話",
+			text:     "x",
+			metadata: `{"content_item_metadata":[{"provenance":{"type":"agents_md"}},{"provenance":{"type":"user"}}]}`,
+			wantMeta: false,
+		},
+		{
+			name:     "unknown だけなら本文の印で判定する",
+			text:     "# AGENTS.md instructions for /w",
+			metadata: `{"content_item_metadata":[{"provenance":{"type":"unknown"}}]}`,
+			wantMeta: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			text, _ := json.Marshal(c.text)
+			body := `{"timestamp":"2026-10-25T05:00:00Z","type":"session_meta","payload":{"id":"s","session_id":"s","timestamp":"2026-10-25T05:00:00Z","cwd":"/w","source":"cli"}}
+{"timestamp":"2026-10-25T05:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":` + string(text) + `}],"internal_chat_message_metadata_passthrough":` + c.metadata + `}}
+`
+			sess := parseBody(t, body)
+			if len(sess.Messages) != 1 {
+				t.Fatalf("Messages = %+v, want 1 件", sess.Messages)
+			}
+			if got := sess.Messages[0].IsMeta; got != c.wantMeta {
+				t.Errorf("IsMeta = %v, want %v", got, c.wantMeta)
+			}
+		})
 	}
 }
 
