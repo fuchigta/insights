@@ -1,0 +1,166 @@
+# このリポジトリの作法
+
+コーディングエージェント（および人間）がこのリポジトリで作業するときの取り決め。
+
+## コミットメッセージ
+
+**Conventional Commits に従う。** リリースノートはこの type ごとに分類して自動生成される（`cliff.toml`）ため、
+守られないとチェンジログが「その他」ばかりになって役に立たなくなる。
+
+```
+<type>[(scope)][!]: <説明>
+```
+
+| type | 使う場面 |
+|---|---|
+| `feat` | 機能追加 |
+| `fix` | 不具合修正 |
+| `perf` | 性能改善 |
+| `refactor` | 挙動を変えない内部変更 |
+| `docs` | ドキュメントのみ |
+| `test` | テストのみ |
+| `build` | ビルド・依存関係 |
+| `ci` | CI・リリースワークフロー |
+| `chore` | 上記に当てはまらない雑務 |
+| `revert` | 取り消し |
+
+- scope は任意。パッケージ名（`rollup` / `judge` / `render` など）を使う
+- 破壊的変更は type の直後に `!` を付ける
+- 説明は日本語でよい。**何をしたかが分かるように書く**（「修正」「更新」だけにしない）
+- 本文には「なぜそうしたか」を書く。差分を読めば分かることは書かない
+
+```
+feat: HTML レポートに推移グラフを追加する
+fix(rollup): サブエージェントのコストが二重計上される問題を直す
+feat(judge)!: 評価スキーマの列挙値を変更する
+```
+
+### 強制の仕組み
+
+ローカルでは commit-msg フックが弾く。**clone 後に一度だけ有効化すること。**
+
+```bash
+git config core.hooksPath .githooks
+```
+
+フックは clone に含まれず有効化も手動なので、すり抜けは起こりうる。CI の `commit message` ジョブが
+最後の歯止めになっている。
+
+## コードのスタイル
+
+- **コメントは日本語、識別子・パッケージ名は英語。** 既存ファイルのコメント密度に合わせる
+- コメントには「なぜ」を書く。コードを読めば分かる「何を」は書かない
+- エラーは `fmt.Errorf("...: %w", err)` でラップする
+- 利用者に見えるメッセージ（CLI の出力・ヘルプ・エラー）は日本語
+
+## 変更を入れる前に通すもの
+
+```bash
+gofmt -l ./cmd ./internal   # 出力が空であること
+go vet ./...
+go test ./...
+```
+
+CI は Linux / macOS / Windows の 3 環境で上記を実行し、競合検出器（`go test -race`）と
+`go mod tidy` の差分チェックも回している。**Windows でしか確認していないと OS 依存の不具合を
+見落とす**（実際に、パス比較が Windows 前提になっていた不具合を CI が検出している）。
+
+## ドキュメントの対応表
+
+コードとドキュメントの片方だけを直して、もう片方が古いまま残るのを機械で止めている。
+対応は `.spotter.yml` の `checks.doc-sync.pairs` に「コードのパス → 一緒に直すドキュメント」
+として書いてあり、`.githooks/commit-msg` がコミット時に、CI の `repo guards` ジョブが
+コミット単位で検査する（コード側だけが入っていれば拒否する）。検査の実体は外部ツール
+`spotter`（[github.com/fuchigta/spotter](https://github.com/fuchigta/spotter)）。
+
+**ドキュメントを増やしたら、対応するコードの場所を `.spotter.yml` の `pairs` に 1 行足すこと。**
+表に載っていないドキュメントは検査されない＝誰にも気付かれずに陳腐化する。
+
+- `when` に正規表現を書くと、その差分行に一致したときだけ発火する。ファイルの一部だけが
+  ドキュメントと対応している場合（例: `internal/cli/*.go` のうちコマンド定義の行だけ）に使う
+- `*_test.go` は常に対象外。テストは利用者に見える面を定義しないため
+- 発火が過剰・不足していると感じたら、我慢して回避し続けずに `pairs` のほうを直す
+
+ドキュメントに影響しない変更は、**コミットメッセージの本文**に次の行を入れて外す。
+
+```
+Doc-Sync: skip 設定項目は増やしていない（内部のリファクタリングのみ）
+```
+
+環境変数ではなくコミットメッセージにしているのは、**ローカルで通した判断が CI でもそのまま
+通る必要がある**ため。環境変数の逃げ道は CI に届かず、手元では通ったのに CI だけ落ちる、という
+状態になる。トレーラなら理由ごと履歴に残り、フックと CI が同じものを見て判断できる。
+
+フックは clone に含まれず有効化も手動なので（`git config core.hooksPath .githooks`）、
+すり抜けは起こりうる。CI の `repo guards` ジョブが最後の歯止めになっている。
+
+## コミット時に走る検査
+
+`.githooks/commit-msg` が `spotter check` を呼び、複数の検査をまとめて実行する（1 つ失敗しても
+残りは走る。直すたびに次の失敗が出てくるとフックを疎まれるため）。CI の `repo guards` /
+`commit message` ジョブが同じ `spotter check` を同じ引数で呼ぶので、**手元で通ったものは
+CI でも通る**。何を見ているかの一覧は [docs/development.md](docs/development.md) にある。
+
+逃げ道はすべてコミットメッセージ本文のトレーラで、理由を添えて書く。
+
+```
+Doc-Sync: skip 設定項目は増やしていない（内部のリファクタリングのみ）
+Unwanted-Files: skip 検証用の最小サンプルとして意図的に追加
+```
+
+検査（`.spotter.yml` の `checks`）を足したり挙動を変えたりしたら、`docs/development.md` の
+一覧も直すこと（対応表で強制している）。
+
+CI で落ちたときの直し方は検査によって違う。`doc sync` は PR 全体をひとまとめに見るので
+**ドキュメントを直すコミットを足せば通る**。混入の検査はコミット単位なので、後から消しても
+直らない（履歴に残るため、そのコミットごとやり直す）。詳しくは
+[docs/development.md](docs/development.md)。
+
+## 課金に関わる注意
+
+**`claude -p` は Claude Code のサブスクリプション枠ではなく API の従量枠を消費する。** 枠は月あたり
+限られているので、動作確認のために気軽に評価を走らせないこと。
+
+- 評価の挙動を試したいときは、実際に `insights judge` を回すのではなく**フェイクの `judge.Judge`
+  実装**を使う。テストはすべてこの方針で書かれている
+- どうしても実行が必要な場合は、対象を `--limit` で絞り、`--yes` を付けずに推定コストを確認してから実行する
+- `claude -p` を呼ぶコードには必ず `--max-budget-usd` を渡す（1 回の暴走で枠を使い切らないため）
+- **`codex exec` には支出上限のフラグが無い。** 歯止めはタイムアウトだけなので、`codex exec` を
+  呼ぶコードには必ず `context.WithTimeout` を掛ける（`internal/judge/codexcli`）。上限を渡せない
+  ぶん、既定のタイムアウトを安易に伸ばさないこと
+
+## プロンプトを変更したとき
+
+評価プロンプトを変えたら **`PromptVersion` を上げる**こと。評価結果のキャッシュはこの値をキーに
+含めており、上げないと古いプロンプトの評価が再利用され続ける。
+
+- セッション評価: `internal/judge/prompts/prompts.go`
+- 日報・振り返り: `internal/rollup/synth.go`
+
+## ログソースを触るとき
+
+対応エージェントは Claude Code と Codex で、違いは `internal/source/*` に閉じ込めてある。
+
+- **Codex のロールアウト形式は公開仕様として文書化されていない。** 直すときは推測せず
+  [openai/codex](https://github.com/openai/codex) のソース（`codex-rs/rollout`・`codex-rs/protocol`）を
+  読んで合わせること。何をどう対応付けたかは `internal/source/codex/parse.go` のコメントにある
+- **`internal/cli` のテストで設定を作るときは `isolateCodexSource` を呼ぶ。** codex ソースは既定で
+  有効かつ root 空で `$CODEX_HOME`（無ければ `~/.codex`）に解決されるため、これを忘れると
+  テストがその環境の実ログを読み、実行する人によって結果が変わる
+
+## spotter
+
+`.githooks/commit-msg` と CI の検査は、汎用ツール `spotter`（[github.com/fuchigta/spotter](https://github.com/fuchigta/spotter)）
+を呼んでいる。insights 側にはコードは無く、`.github/workflows/ci.yml` の `SPOTTER_VERSION` と
+`.spotter.yml` の `required_version` で参照するリリースバージョンを固定している
+（自動追従にしていない。spotter 側のリリースで insights の CI が意図せず影響を受けないため）。
+
+## 改行コード
+
+`.gitattributes` で作業ツリーを LF に統一している。これを外すと、埋め込みアセットとのバイト比較
+（スキルの改変検出）と golden ファイルの比較が Windows で壊れる。
+
+## トップレベルの Markdown
+
+`.gitignore` で既定除外にし、リポジトリに入れるものだけを明示的に許可している。作業メモや下書きを
+取り違えて公開しないため。追加したい場合は `.gitignore` に否定パターンを 1 行足すこと。

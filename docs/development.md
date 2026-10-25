@@ -76,13 +76,13 @@ Codex 側のロールアウトの構造は公開仕様として文書化され�
   を同じ引数で呼ぶので、手元で通ったものは CI でも通る
   - `doc-sync`: コードとドキュメントの対応（対応表は `.spotter.yml` の `checks.doc-sync.pairs`）。
     片方だけが入っているコミットがあると落ちる。逃げ道は `Doc-Sync: skip <理由>`
-  - `doc-paths`: ドキュメント（`README.md` / `CLAUDE.md` / `docs/*.md` / `.github/*.md`）が
+  - `doc-paths`: ドキュメント（`README.md` / `CLAUDE.md` / `AGENTS.md` / `docs/*.md` / `.github/*.md`）が
     名指ししているパスの実在。まだ無いものを例として挙げている参照は
     `.spotter.yml` の `checks.doc-paths.ignore` に列挙して除外する
   - `unwanted-files`: セッションログ・データベース・巨大ファイルの混入。
     逃げ道は `Unwanted-Files: skip <理由>`
   - `commit-types`: Conventional Commits の type 一覧が `cliff.toml` / `.spotter.yml`
-    （`checks.commit-subject.allowed_types`）/ `CLAUDE.md` の 3 箇所で一致しているか。
+    （`checks.commit-subject.allowed_types`）/ `AGENTS.md` の 3 箇所で一致しているか。
     1 箇所だけに足すと、通るのにリリースノートで「その他」に落ちる
 
 これらの検査の実体は `spotter`（[github.com/fuchigta/spotter](https://github.com/fuchigta/spotter)）です。
