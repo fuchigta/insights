@@ -48,6 +48,35 @@ func TestLoad_EmbeddedTableIsPriced(t *testing.T) {
 	}
 }
 
+// TestResolveAlias_EmbeddedTable は、Claude Code のエイリアスが埋め込み単価表の中で
+// その系列の最新世代に解決されることを確かめる。日付付きや旧命名（claude-3-5-sonnet-*）は
+// 候補にしない。単価表が同期で更新されたら期待値も合わせて更新すること。
+func TestResolveAlias_EmbeddedTable(t *testing.T) {
+	tbl, err := Load(nil)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	tests := []struct {
+		in, want string
+		ok       bool
+	}{
+		{"haiku", "claude-haiku-5-5", true},
+		{"sonnet", "claude-sonnet-5-5", true},
+		{"opus", "claude-opus-5-5", true},
+		{"Opus[1m]", "claude-opus-5-5", true},
+		{"claude-sonnet-5", "claude-sonnet-5", true},
+		{"claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001", true},
+		{"no-such-model", "", false},
+		{"nosuchfamily", "", false},
+	}
+	for _, tt := range tests {
+		got, ok := tbl.ResolveAlias(tt.in)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("ResolveAlias(%q) = (%q, %v), want (%q, %v)", tt.in, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
 func TestRate_TableDriven(t *testing.T) {
 	overrides := map[string]Rate{
 		"claude-sonnet-5": {Input: 3, Output: 15, CacheWrite5m: 3.75, CacheWrite1h: 6, CacheRead: 0.3},

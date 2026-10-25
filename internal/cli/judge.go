@@ -19,6 +19,7 @@ import (
 	"github.com/fuchigta/insights/internal/judge"
 	"github.com/fuchigta/insights/internal/judge/prompts"
 	"github.com/fuchigta/insights/internal/model"
+	"github.com/fuchigta/insights/internal/pricing"
 	"github.com/fuchigta/insights/internal/store"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -28,8 +29,8 @@ import (
 // 意味（対象日 vs since 基準時刻）が異なるためこのファイル用に別名を定義する。
 const dayLayout = sinceDateLayout
 
-// estimatedCostPerSessionHaikuUSD / estimatedCostPerSessionSonnetUSD は
-// 事前確認に使う「1 セッションあたりの評価コスト」の概算値（USD）。
+// estimateBaseModel / estimateBaseCostUSD は、事前確認に使う「1 セッションあたりの
+// 評価コスト」の基準。他のモデルは単価表の入力単価の比でこの基準から換算する。
 //
 // 実測の内訳（claude-haiku-4-5、2026-08-29 時点）:
 //   - スキーマ無しの最小呼び出し: 約 $0.0055
@@ -38,23 +39,52 @@ const dayLayout = sinceDateLayout
 //   - 実セッション 1 件の評価（スキーマ無し）: 約 $0.025
 //
 // 実運用は --json-schema 付きなので、固定費の実測（$0.074）を下回ることはない。
-// 安全側に倒して $0.08 を基準とし、claude-sonnet-5 は単価が 3 倍なので約3倍とする。
-// セッションの長さ・委譲件数で実費は大きく変動するため、あくまで事前確認用の目安。
+// 安全側に倒して $0.08 を基準とする。セッションの長さ・委譲件数で実費は大きく
+// 変動するため、あくまで事前確認用の目安。
+//
+// 以前は「名前に haiku を含めば $0.08、それ以外は 3 倍」と決め打ちしていたが、
+// 単価の改定（Sonnet 5 の値下げ、Haiku 5.5 の登場など）に追従できず、Opus も
+// Sonnet 扱いで過小に出ていた。単価表から比を取れば、新しいモデルにも追従する。
 //
 // なお claude -p は対話セッションのサブスクリプション枠ではなく API 従量枠を
 // 消費する。枠は月あたり限られているので、この見積もりは過小に出さないこと。
 const (
-	estimatedCostPerSessionHaikuUSD  = 0.08
-	estimatedCostPerSessionSonnetUSD = estimatedCostPerSessionHaikuUSD * 3
+	estimateBaseModel   = "claude-haiku-4-5"
+	estimateBaseCostUSD = 0.08
+
+	// estimateFallbackAlias は judge.model が単価表で引けないときに換算に使う系列。
+	// 過小に出さないため、通常の系列で最も高い opus の最新に寄せる。
+	estimateFallbackAlias = "opus"
+	// estimateFallbackCostUSD は単価表で基準すら引けないとき（表が壊れているなど）の値。
+	estimateFallbackCostUSD = 0.40
 )
 
 // estimateCostPerSession はモデル名から 1 セッションあたりの概算コストを返す。
 // 上記の定数コメントのとおり実測値に基づく大まかな概算であり、正確な金額ではない。
-func estimateCostPerSession(modelName string) float64 {
-	if strings.Contains(strings.ToLower(modelName), "haiku") {
-		return estimatedCostPerSessionHaikuUSD
+//
+// 入力単価の比で換算するのは、評価の費用の大半が入力（台本・スキーマのツール定義）で、
+// Claude の各モデルは入力と出力の単価の比がそろっているため。キャッシュ読み取りの倍率は
+// 世代で違う（5.5 世代は x0.05）が、固定費の多くはキャッシュに乗らない初回の入力なので無視する。
+func estimateCostPerSession(prices *pricing.Table, modelName string) float64 {
+	if prices == nil {
+		return estimateFallbackCostUSD
 	}
-	return estimatedCostPerSessionSonnetUSD
+	base, ok := prices.Rate(estimateBaseModel)
+	if !ok || base.Input <= 0 {
+		return estimateFallbackCostUSD
+	}
+	name, ok := prices.ResolveAlias(modelName)
+	if !ok {
+		name, ok = prices.ResolveAlias(estimateFallbackAlias)
+	}
+	if !ok {
+		return estimateFallbackCostUSD
+	}
+	r, ok := prices.Rate(name)
+	if !ok {
+		return estimateFallbackCostUSD
+	}
+	return estimateBaseCostUSD * r.Input / base.Input
 }
 
 // judgeOptions は `insights judge` の実行パラメータ。
@@ -254,7 +284,7 @@ func judgeRun(cmd *cobra.Command, cfg *config.Config, opts judgeOptions) (*judge
 	}
 
 	// 見積もりは固定値ではなく、DB に残っている評価の実績から出す（internal/cli/estimate.go）。
-	estimator := newEvalCostEstimator(db, cfg.Judge.Model, cfg.Judge.Backend)
+	estimator := newEvalCostEstimator(db, loadEstimatePrices(cfg), cfg.Judge.Model, cfg.Judge.Backend)
 	estimated, fromActual := estimator.estimateTargets(targets)
 	result.EstimatedCostUSD = estimated
 

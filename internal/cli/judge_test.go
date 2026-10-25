@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/fuchigta/insights/internal/config"
 	"github.com/fuchigta/insights/internal/judge"
 	"github.com/fuchigta/insights/internal/judge/claudecli"
+	"github.com/fuchigta/insights/internal/pricing"
 	"github.com/fuchigta/insights/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -539,14 +541,47 @@ func TestResolveJudgeRange(t *testing.T) {
 	})
 }
 
+// TestEstimateCostPerSession は、既定の見積もりが単価表の入力単価の比で換算され、
+// エイリアスでもフルネームでも同じ額になることを確かめる。
 func TestEstimateCostPerSession(t *testing.T) {
-	haiku := estimateCostPerSession("claude-haiku-4-5")
-	sonnet := estimateCostPerSession("claude-sonnet-5")
-	if haiku != estimatedCostPerSessionHaikuUSD {
-		t.Errorf("haiku 単価 = %v, want %v", haiku, estimatedCostPerSessionHaikuUSD)
+	prices, err := pricing.Load(map[string]pricing.Rate{
+		"claude-haiku-4-5":  {Input: 1, Output: 5},
+		"claude-haiku-5-5":  {Input: 0.1, Output: 0.5},
+		"claude-sonnet-5":   {Input: 2, Output: 10},
+		"claude-sonnet-5-5": {Input: 2, Output: 10},
+		"claude-opus-5":     {Input: 5, Output: 25},
+		"claude-opus-5-5":   {Input: 4, Output: 20},
+	})
+	if err != nil {
+		t.Fatalf("pricing.Load() error = %v", err)
 	}
-	if sonnet <= haiku {
-		t.Errorf("sonnet 単価 (%v) は haiku (%v) より高いはず", sonnet, haiku)
+
+	tests := []struct {
+		name  string
+		model string
+		want  float64
+	}{
+		{"基準モデルはそのまま", "claude-haiku-4-5", estimateBaseCostUSD},
+		{"新しい Haiku は単価の比で安くなる", "claude-haiku-5-5", estimateBaseCostUSD * 0.1},
+		{"Opus は Sonnet 扱いにしない", "claude-opus-5-5", estimateBaseCostUSD * 4},
+		// エイリアスは単価表の中で世代番号が最大のものに解決する。
+		{"エイリアス haiku", "haiku", estimateBaseCostUSD * 0.1},
+		{"エイリアス opus は 5-5 を採る（5 より新しい）", "opus", estimateBaseCostUSD * 4},
+		{"角括弧の接尾辞は外す", "opus[1m]", estimateBaseCostUSD * 4},
+		{"日付付きのフルネーム", "claude-haiku-4-5-20251001", estimateBaseCostUSD},
+		// 単価表で引けないモデルは、過小に出さないよう opus の最新で換算する。
+		{"未知のモデルは opus 扱い", "claude-unknown-9", estimateBaseCostUSD * 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := estimateCostPerSession(prices, tt.model); math.Abs(got-tt.want) > 1e-9 {
+				t.Errorf("estimateCostPerSession(%q) = %v, want %v", tt.model, got, tt.want)
+			}
+		})
+	}
+
+	if got := estimateCostPerSession(nil, "haiku"); got != estimateFallbackCostUSD {
+		t.Errorf("単価表が無いとき = %v, want %v（安全側の固定値）", got, estimateFallbackCostUSD)
 	}
 }
 
