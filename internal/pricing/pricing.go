@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/fuchigta/insights/internal/model"
 )
@@ -150,6 +151,10 @@ func (t *Table) Rate(modelName string) (Rate, bool) {
 // 3 世代前の安い単価で黙って計算される。世代の区切り（"."）をまたぐ一致は
 // 認めないことで、知らないモデルは「単価未登録」として警告に出せる
 // ——このツールでは、それらしい金額が出るより未知だと分かるほうが有用なので。
+//
+// Claude は世代そのものを "-" で区切る（"claude-opus-5" と "claude-opus-5-5" は別世代で、
+// 単価も違う）。"-" の直後が 1〜2 桁の数字だけの区切りは世代番号とみなし、派生として
+// 認めない。日付サフィックス（8 桁）は呼び出し前に剥がしてあるので、ここには来ない。
 func isVariantOf(modelName, registered string) bool {
 	if registered == "" || len(modelName) < len(registered) || modelName[:len(registered)] != registered {
 		return false
@@ -157,7 +162,27 @@ func isVariantOf(modelName, registered string) bool {
 	if len(modelName) == len(registered) {
 		return true
 	}
-	return modelName[len(registered)] == '-'
+	if modelName[len(registered)] != '-' {
+		return false
+	}
+	return !isGenerationSegment(modelName[len(registered)+1:])
+}
+
+// isGenerationSegment は rest の先頭の "-" 区切り 1 つ分が、世代番号（1〜2 桁の数字）かを返す。
+func isGenerationSegment(rest string) bool {
+	seg := rest
+	if i := strings.IndexByte(rest, '-'); i >= 0 {
+		seg = rest[:i]
+	}
+	if len(seg) == 0 || len(seg) > 2 {
+		return false
+	}
+	for _, c := range seg {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // Cost はモデルとトークン使用量から USD 建てのコストを算出する。
