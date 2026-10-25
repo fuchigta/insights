@@ -124,7 +124,11 @@ type SessionCard struct {
 	StartedAt       time.Time `json:"started_at"`
 	DurationMinutes float64   `json:"duration_minutes"`
 	IsSidechain     bool      `json:"is_sidechain"`
-	Entrypoint      string    `json:"entrypoint"`
+	// ParentSessionID はサブエージェントを委譲した親セッション。単独のカードになる
+	// ワークツリーの子では、これが無いと日報の AI が first_prompt（親の AI が書いた
+	// 委譲の指示）をユーザーの依頼と読み違える。
+	ParentSessionID string `json:"parent_session_id,omitempty"`
+	Entrypoint      string `json:"entrypoint"`
 	// ExecutionMode は "interactive"（対話実行）か "automated"（`claude -p` などの
 	// 非対話実行）。日報・振り返りのプロンプトは entrypoint の生値から自動実行かを
 	// 推測できないため、判定済みの値を渡す。過去の daily_rollups には無いので空もありうる。
