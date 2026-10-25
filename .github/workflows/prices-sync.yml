@@ -1,0 +1,74 @@
+name: Prices Sync
+
+# 埋め込み価格表（internal/pricing/prices.json）を LiteLLM の価格表から週 1 回作り直し、
+# 差分があれば PR にする。実行時には取りに行かない（オフライン動作・docs/privacy.md の方針）ので、
+# 人が PR をレビューしてから取り込む。詳細は docs/development.md。
+#
+# 注意: GITHUB_TOKEN で作った PR では CI（ci.yml）が自動起動しない（GitHub の仕様）。
+# 必要なら PR を閉じて開き直すか、ブランチに空コミットを push して CI を走らせる。
+on:
+  schedule:
+    - cron: '0 0 * * 1' # 月曜 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  LITELLM_URL: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+  SYNC_BRANCH: chore/prices-sync
+
+jobs:
+  sync:
+    name: prices sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: LiteLLM の価格表を取得する
+        run: curl -fsSL --retry 3 -o "$RUNNER_TEMP/litellm.json" "$LITELLM_URL"
+
+      - name: prices.json を生成する
+        run: go run ./cmd/pricesync -litellm "$RUNNER_TEMP/litellm.json" -version "$(date -u +%F)"
+
+      - name: 価格表のテストを通す
+        run: go test ./internal/pricing/...
+
+      - name: 差分があれば PR を作る
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # version（日付）だけが変わる実行では PR を作らない。
+          if git diff --quiet -I'"version":' -- internal/pricing/prices.json; then
+            echo "価格表に変更はありません"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$SYNC_BRANCH"
+          git add internal/pricing/prices.json
+          git commit \
+            -m "build(pricing): LiteLLM の価格表に同期する" \
+            -m "手作業の価格表は更新が遅れるため、週 1 回 LiteLLM から再生成している。" \
+            -m "Doc-Sync: skip 価格表の値の更新のみ（同期処理の挙動は変えていない）"
+          git push --force origin "$SYNC_BRANCH"
+
+          body=$(printf '%s\n\n%s\n' \
+            'LiteLLM の価格表から `internal/pricing/prices.json` を再生成しました（.github/workflows/prices-sync.yml）。既存モデルの単価が変わっていないか、差分を確認してからマージしてください。' \
+            'GITHUB_TOKEN で作成した PR のため CI は自動で起動しません。必要ならこの PR を閉じて開き直してください。')
+
+          open_prs=$(gh pr list --head "$SYNC_BRANCH" --state open --json number --jq 'length')
+          if [ "$open_prs" != "0" ]; then
+            echo "既存の PR を更新しました（ブランチを force push 済み）"
+          else
+            gh pr create --head "$SYNC_BRANCH" --base main \
+              --title "build(pricing): LiteLLM の価格表に同期する" \
+              --body "$body"
+          fi
