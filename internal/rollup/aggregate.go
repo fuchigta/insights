@@ -315,6 +315,9 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 		pa.stat.Sessions++
 		pa.stat.DurationMinutes += duration
 		pa.stat.CostUSD += sessionCost
+		if !sessionAllKnown {
+			pa.stat.UnpricedSessions++
+		}
 		pa.stat.PullRequestCount += sd.PullRequestCount
 
 		if sd.Eval == nil {

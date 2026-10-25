@@ -69,7 +69,11 @@ type ProjectStat struct {
 	// CostShare はその日の総コストに占める割合（0..1）。どこに金が向いたかを
 	// 絶対額ではなく配分として見るために持つ。
 	CostShare float64 `json:"cost_share"`
-	Goal      string  `json:"goal,omitempty"` // 設定に書かれたこのプロジェクトの目標
+	// UnpricedSessions は単価未登録のモデルを使ったセッションの数。0 でなければ CostUSD と
+	// CostShare はそのぶんを含まない（0 円ではなく金額不明）。AI に「無料だった」と
+	// 誤読させないために、金額と並べて渡す。
+	UnpricedSessions int    `json:"unpriced_sessions,omitempty"`
+	Goal             string `json:"goal,omitempty"` // 設定に書かれたこのプロジェクトの目標
 
 	// 以下はプロジェクト単位の振り返りのために持つ。日次全体の分布だけでは
 	// 「どのプロジェクトで何が起きたか」が分からず、改善行動に繋がらないため。
