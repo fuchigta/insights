@@ -385,6 +385,7 @@ func BuildDaily(in DailyInput) (*Daily, error) {
 			StartedAt:        c.row.StartedAt.In(loc),
 			DurationMinutes:  c.duration,
 			IsSidechain:      c.row.IsSidechain,
+			ParentSessionID:  c.row.ParentSessionID,
 			Entrypoint:       c.row.Entrypoint,
 			ExecutionMode:    executionMode(c.row.Entrypoint),
 			Models:           c.models,
