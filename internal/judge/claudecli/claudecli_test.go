@@ -144,6 +144,48 @@ func TestRecordRun_AccumulatesAndIsConcurrencySafe(t *testing.T) {
 	}
 }
 
+// TestResolvedModel は、--model にエイリアスを渡しても、記録には claude -p が報告した
+// 実際のモデル名が残ることを確かめる（出力の形は claude -p --output-format json の実測）。
+func TestResolvedModel(t *testing.T) {
+	tests := []struct {
+		name string
+		out  string
+		want string
+	}{
+		{
+			name: "エイリアスは実際のモデル名に解決される",
+			out:  `{"modelUsage":{"claude-haiku-5-5":{"costUSD":0.0033,"canonicalModel":"claude-haiku-5-5"}}}`,
+			want: "claude-haiku-5-5",
+		},
+		{
+			name: "補助のモデルがあっても費用が最も大きいものを採る",
+			out:  `{"modelUsage":{"claude-haiku-5-5":{"costUSD":0.001},"claude-sonnet-5-5":{"costUSD":0.12}}}`,
+			want: "claude-sonnet-5-5",
+		},
+		{
+			name: "canonicalModel があればキーより優先する",
+			out:  `{"modelUsage":{"haiku-alias-key":{"costUSD":0.01,"canonicalModel":"claude-haiku-5-5"}}}`,
+			want: "claude-haiku-5-5",
+		},
+		{
+			name: "内訳が無ければ要求したモデル名のまま",
+			out:  `{"total_cost_usd":0.01}`,
+			want: "haiku",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var o cliOutput
+			if err := json.Unmarshal([]byte(tt.out), &o); err != nil {
+				t.Fatalf("Unmarshal() error = %v", err)
+			}
+			if got := o.resolvedModel("haiku"); got != tt.want {
+				t.Errorf("resolvedModel() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildSystemPrompt(t *testing.T) {
 	req := judge.Request{
 		System: "ROLE-INSTRUCTIONS",

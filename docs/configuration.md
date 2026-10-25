@@ -14,8 +14,8 @@ sources:
     root: ""
     enabled: true
 judge:
+  # model: haiku  # 省略時は insights の既定値（Claude Code のエイリアス）を使う。固定したいときだけ書く
   backend: claude-cli
-  model: claude-sonnet-5
   concurrency: 3
   timeout: 3m0s
 evidence:
@@ -53,7 +53,7 @@ update:
 | `sources.codex.root` | Codex のログ置き場（`sessions/` と `archived_sessions/` を見る）。**空にしておくと環境変数 `CODEX_HOME`、無ければ `~/.codex` を実行時に解決する** | `""`（自動判定） |
 | `sources.codex.enabled` | Codex ソースの有効/無効 | `true` |
 | `judge.backend` | AI 評価バックエンド識別子（`claude-cli` / `codex-cli`） | `claude-cli` |
-| `judge.model` | 評価に使うモデル。バックエンドに合わせて書く（`codex-cli` なら `gpt-5.5` など） | `claude-sonnet-5` |
+| `judge.model` | 評価に使うモデル。バックエンドに合わせて書く（`codex-cli` なら `gpt-5.5` など）。`haiku` / `sonnet` / `opus` のような Claude Code のエイリアスも書ける。**書かなければ既定値が使われ、insights の更新で既定値が変わればそれに追従する**（`config init` の雛形もこの行をコメントで書き出す） | `haiku` |
 | `judge.concurrency` | 評価の並列実行数 | `3` |
 | `judge.timeout` | 評価バックエンド 1 回の実行タイムアウト | `3m0s`（180秒） |
 | `evidence.git` | git commit 収集の有効/無効 | `true` |

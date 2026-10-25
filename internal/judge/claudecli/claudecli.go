@@ -165,7 +165,7 @@ func (j *Judge) EvaluateRun(ctx context.Context, req judge.Request) (json.RawMes
 			CostUSD:    cliOut.TotalCostUSD,
 			DurationMS: cliOut.DurationMS,
 			NumTurns:   cliOut.NumTurns,
-			Model:      req.Model,
+			Model:      cliOut.resolvedModel(req.Model),
 		}
 		j.recordRun(run)
 		lastRun = run
@@ -284,6 +284,38 @@ type cliOutput struct {
 	TotalCostUSD     float64         `json:"total_cost_usd"`
 	NumTurns         int             `json:"num_turns"`
 	DurationMS       int64           `json:"duration_ms"`
+	// ModelUsage は実際に使われたモデルごとの内訳（キーは解決後のモデル名）。
+	// --model に "haiku" のようなエイリアスを渡しても、ここには "claude-haiku-5-5" が入る。
+	ModelUsage map[string]modelUsage `json:"modelUsage"`
+}
+
+// modelUsage は cliOutput.ModelUsage の 1 モデル分のうち使う項目。
+type modelUsage struct {
+	CostUSD        float64 `json:"costUSD"`
+	CanonicalModel string  `json:"canonicalModel"`
+}
+
+// resolvedModel は実際に評価を担ったモデル名を返す。
+//
+// エイリアスの指す先は Claude Code の更新で変わるため、設定値（requested）をそのまま
+// 記録すると、評価の実績（見積もりの元）が新旧のモデルで混ざり、どのモデルで評価したかも
+// 後から分からなくなる。claude -p は内部で別のモデルを補助に使うことがあるので、
+// 費用が最も大きいものを評価の本体とみなす。内訳が無ければ requested を返す。
+func (o *cliOutput) resolvedModel(requested string) string {
+	best, bestCost := "", -1.0
+	for name, u := range o.ModelUsage {
+		if u.CanonicalModel != "" {
+			name = u.CanonicalModel
+		}
+		// 同額なら名前の昇順で決める（map の走査順で結果が揺れないように）。
+		if u.CostUSD > bestCost || (u.CostUSD == bestCost && name < best) {
+			best, bestCost = name, u.CostUSD
+		}
+	}
+	if best == "" {
+		return requested
+	}
+	return best
 }
 
 // runWithBackoff は runOnce を一時的失敗に対して指数バックオフで最大

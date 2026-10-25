@@ -15,7 +15,9 @@ type RunInfo struct {
 	CostUSD    float64 // 実行に掛かった費用。バックエンドが報告しないなら 0
 	DurationMS int64
 	NumTurns   int
-	Model      string
+	// Model は実際に評価を担ったモデル名。バックエンドが分かる場合はエイリアスを解決した
+	// 名前（"haiku" ではなく "claude-haiku-5-5"）を入れる。分からなければ要求したモデル名。
+	Model string
 }
 
 // 評価の失敗は種類ごとに意味（利用者が取るべき手当て）が違うため、番兵エラーで

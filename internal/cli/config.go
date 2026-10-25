@@ -41,7 +41,7 @@ func newConfigInitCommand() *cobra.Command {
 				return fmt.Errorf("設定ファイルの確認に失敗しました: %w", statErr)
 			}
 
-			if err := config.Default().Save(path); err != nil {
+			if err := config.SaveTemplate(path); err != nil {
 				return fmt.Errorf("設定ファイルの書き出しに失敗しました: %w", err)
 			}
 
