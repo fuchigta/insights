@@ -1,6 +1,6 @@
 {
   "_note": "USD / 1M トークン。LiteLLM（BerriAI/litellm の model_prices_and_context_window.json）から internal/pricing/prices_manual.json を重ねて cmd/pricesync が生成したもの。手で編集せず、上書きしたいモデルは prices_manual.json を直すこと（週 1 回のワークフロー prices-sync.yml が PR で更新する）。claude-* は Anthropic、gpt-* は OpenAI の API レート。Anthropic 側のキャッシュ書き込みは LiteLLM の値で、無ければ 5 分は input x1.25、1 時間は input x2 の標準倍率で補う。OpenAI 側はキャッシュ書き込みを別建てで課金しない（Codex の input_tokens は書き込み分を含む合計で、insights は通常の入力として課金する。入れると二重計上になる）ため cache_write_* は 0 で、cache_read には cached input のレートが入る。gpt-*-pro はキャッシュ入力の提供が無いため cache_read も 0。長文の階層価格（プロンプトが一定長を超えると単価が上がるもの）は扱わず短文側の単価を入れているため、長い文脈では過小評価になる。fast mode のように単価が倍になる実行形態も区別できないので、その場合も過小評価になる。契約単価が異なる場合は config の pricing.overrides で上書きする。non_billable は課金対象外の擬似モデル名で、未知モデルとしては扱わない。",
-  "version": "2026-10-25",
+  "version": "2026-11-09",
   "non_billable": [
     "<synthetic>"
   ],
@@ -691,12 +691,33 @@
       "cache_write_1h": 0,
       "cache_read": 1
     },
+    "gpt-6-astra-law": {
+      "input": 10,
+      "output": 50,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1
+    },
+    "gpt-6-cyber": {
+      "input": 20,
+      "output": 100,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 2
+    },
     "gpt-6-luna": {
       "input": 0.1,
       "output": 0.5,
       "cache_write_5m": 0,
       "cache_write_1h": 0,
       "cache_read": 0.01
+    },
+    "gpt-6-rosalind": {
+      "input": 15,
+      "output": 75,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 1.5
     },
     "gpt-6-sol": {
       "input": 2,
@@ -711,6 +732,13 @@
       "cache_write_5m": 0,
       "cache_write_1h": 0,
       "cache_read": 0.1
+    },
+    "gpt-6.1-terra": {
+      "input": 1,
+      "output": 5,
+      "cache_write_5m": 0,
+      "cache_write_1h": 0,
+      "cache_read": 0.05
     },
     "gpt-audio": {
       "input": 2.5,
